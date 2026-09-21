@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import networkx as nx
 
@@ -20,6 +21,23 @@ from production_rag_evaluation.models.schemas import (
     RAGResponse,
     Severity,
 )
+
+_RELEVANCE_STOPWORDS: frozenset[str] = frozenset({
+    "what",
+    "was",
+    "is",
+    "in",
+    "of",
+    "for",
+    "the",
+    "a",
+    "an",
+    "to",
+    "and",
+    "how",
+    "did",
+})
+_WORD_PATTERN = re.compile(r"\b\w+\b")
 
 
 class EvaluationState:
@@ -118,18 +136,25 @@ class EvaluationGraph:
         )
         state.execution_trace.append("verify_claims")
 
+    @staticmethod
+    def _matches_target(
+        target_val: float,
+        extracted_nums: List[Tuple[float, str, str]],
+        tolerance_pct: float,
+    ) -> bool:
+        """Check if target value matches any extracted number within percentage tolerance."""
+        denom = max(abs(target_val), 1e-6)
+        return any(
+            abs(val - target_val) / denom <= tolerance_pct for val, _unit, _raw in extracted_nums
+        )
+
     def _verify_targets(self, state: EvaluationState) -> None:
         target_results: Dict[str, Any] = {}
         answer_nums = self.detector._extract_numerical_values(state.response.generated_answer)
 
         # 1. Structured targets
         for target in state.query.structured_targets:
-            matched = False
-            for val, _unit, _raw in answer_nums:
-                denom = max(abs(target.target_value), 1e-6)
-                if abs(val - target.target_value) / denom <= target.tolerance_pct:
-                    matched = True
-                    break
+            matched = self._matches_target(target.target_value, answer_nums, target.tolerance_pct)
             target_results[target.metric_name] = {"target": target.target_value, "matched": matched}
             if not matched:
                 state.hallucinations.append(
@@ -149,10 +174,8 @@ class EvaluationGraph:
         # 2. Raw expected numerical targets if structured_targets empty
         if not state.query.structured_targets and state.query.expected_numerical_targets:
             for exp_num in state.query.expected_numerical_targets:
-                matched = any(
-                    abs(val - exp_num) / max(abs(exp_num), 1e-6)
-                    <= self.detector.numerical_tolerance_pct
-                    for val, _unit, _raw in answer_nums
+                matched = self._matches_target(
+                    exp_num, answer_nums, self.detector.numerical_tolerance_pct
                 )
                 target_results[str(exp_num)] = {"target": exp_num, "matched": matched}
                 if not matched:
@@ -171,30 +194,14 @@ class EvaluationGraph:
         state.execution_trace.append("verify_targets")
 
     def _compute_relevance(self, state: EvaluationState) -> None:
-        import re
-
-        stopwords = {
-            "what",
-            "was",
-            "is",
-            "in",
-            "of",
-            "for",
-            "the",
-            "a",
-            "an",
-            "to",
-            "and",
-            "how",
-            "did",
-        }
+        q_text_lower = state.query.query_text.lower()
         q_tokens = [
-            w for w in re.findall(r"\b\w+\b", state.query.query_text.lower()) if w not in stopwords
+            w for w in _WORD_PATTERN.findall(q_text_lower) if w not in _RELEVANCE_STOPWORDS
         ]
-        a_tokens = [w for w in re.findall(r"\b\w+\b", state.response.generated_answer.lower())]
+        a_tokens = _WORD_PATTERN.findall(state.response.generated_answer.lower())
 
         if not q_tokens:
-            q_tokens = re.findall(r"\b\w+\b", state.query.query_text.lower())
+            q_tokens = _WORD_PATTERN.findall(q_text_lower)
 
         overlap = set(q_tokens) & set(a_tokens)
         relevance = len(overlap) / max(len(set(q_tokens)), 1)

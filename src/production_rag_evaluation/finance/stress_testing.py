@@ -17,9 +17,66 @@ from production_rag_evaluation.models.schemas import (
 class MonteCarloStressTester:
     """Simulates return distributions under adverse stress conditions and hallucinated inputs."""
 
+    _SCENARIO_PRESETS = {
+        StressScenarioType.BASELINE: {
+            "volatility_shock": 1.0,
+            "drift_shock": 0.0,
+            "max_drawdown": 0.25,
+        },
+        StressScenarioType.VOLATILITY_SPIKE: {
+            "volatility_shock": 2.5,
+            "drift_shock": -0.05,
+            "max_drawdown": 0.30,
+        },
+        StressScenarioType.LIQUIDITY_CRUNCH: {
+            "volatility_shock": 3.0,
+            "drift_shock": -0.15,
+            "max_drawdown": 0.20,
+        },
+        StressScenarioType.RATE_SHOCK: {
+            "volatility_shock": 1.8,
+            "drift_shock": -0.10,
+            "max_drawdown": 0.25,
+        },
+        StressScenarioType.BLACK_SWAN: {
+            "volatility_shock": 3.5,
+            "drift_shock": -0.30,
+            "max_drawdown": 0.35,
+        },
+        StressScenarioType.HALLUCINATION_CASCADE: {
+            "volatility_shock": 2.2,
+            "drift_shock": -0.20,
+            "max_drawdown": 0.25,
+        },
+    }
+
     def __init__(self, random_seed: Optional[int] = 42) -> None:
         self.random_seed = random_seed
         self._rng = np.random.default_rng(random_seed)
+
+    @staticmethod
+    def _generate_paths_from_shocks(
+        initial_value: float,
+        mu: float,
+        sigma: float,
+        horizon_days: int,
+        n_simulations: int,
+        z: np.ndarray,
+        volatility_shock_multiplier: float = 1.0,
+        drift_shock: float = 0.0,
+    ) -> np.ndarray:
+        """Simulate asset price paths given normalized innovation shocks."""
+        dt = 1.0 / 252.0
+        eff_sigma = max(1e-6, sigma * volatility_shock_multiplier)
+        eff_mu = mu + drift_shock
+        daily_drift = (eff_mu - 0.5 * eff_sigma**2) * dt
+        daily_diffusion = eff_sigma * np.sqrt(dt) * z
+
+        daily_returns = np.exp(daily_drift + daily_diffusion)
+        paths = np.empty((n_simulations, horizon_days + 1), dtype=np.float64)
+        paths[:, 0] = initial_value
+        paths[:, 1:] = initial_value * np.cumprod(daily_returns, axis=1)
+        return paths
 
     def simulate_gbm_paths(
         self,
@@ -32,21 +89,17 @@ class MonteCarloStressTester:
         drift_shock: float = 0.0,
     ) -> np.ndarray:
         """Simulate geometric brownian motion asset paths under optional volatility shock."""
-        dt = 1.0 / 252.0
-        eff_sigma = max(1e-6, sigma * volatility_shock_multiplier)
-        eff_mu = mu + drift_shock
-
-        # Generate standard normal shocks: shape (n_simulations, horizon_days)
         z = self._rng.standard_normal((n_simulations, horizon_days))
-        daily_drift = (eff_mu - 0.5 * eff_sigma**2) * dt
-        daily_diffusion = eff_sigma * np.sqrt(dt) * z
-
-        daily_returns = np.exp(daily_drift + daily_diffusion)
-        paths = np.empty((n_simulations, horizon_days + 1), dtype=np.float64)
-        paths[:, 0] = initial_value
-        paths[:, 1:] = initial_value * np.cumprod(daily_returns, axis=1)
-
-        return paths
+        return self._generate_paths_from_shocks(
+            initial_value=initial_value,
+            mu=mu,
+            sigma=sigma,
+            horizon_days=horizon_days,
+            n_simulations=n_simulations,
+            z=z,
+            volatility_shock_multiplier=volatility_shock_multiplier,
+            drift_shock=drift_shock,
+        )
 
     def simulate_fat_tailed_paths(
         self,
@@ -60,25 +113,20 @@ class MonteCarloStressTester:
         drift_shock: float = 0.0,
     ) -> np.ndarray:
         """Simulate fat-tailed paths using Student-t innovations to model severe black swan tail risk."""
-        dt = 1.0 / 252.0
-        eff_sigma = max(1e-6, sigma * volatility_shock_multiplier)
-        eff_mu = mu + drift_shock
-
-        # Student-t shocks with variance normalization: Var(t_df) = df / (df - 2)
         df = max(3, degrees_of_freedom)
         scale_factor = np.sqrt((df - 2.0) / df)
         z_raw = stats.t.rvs(df, size=(n_simulations, horizon_days), random_state=self.random_seed)
         z = z_raw * scale_factor
-
-        daily_drift = (eff_mu - 0.5 * eff_sigma**2) * dt
-        daily_diffusion = eff_sigma * np.sqrt(dt) * z
-
-        daily_returns = np.exp(daily_drift + daily_diffusion)
-        paths = np.empty((n_simulations, horizon_days + 1), dtype=np.float64)
-        paths[:, 0] = initial_value
-        paths[:, 1:] = initial_value * np.cumprod(daily_returns, axis=1)
-
-        return paths
+        return self._generate_paths_from_shocks(
+            initial_value=initial_value,
+            mu=mu,
+            sigma=sigma,
+            horizon_days=horizon_days,
+            n_simulations=n_simulations,
+            z=z,
+            volatility_shock_multiplier=volatility_shock_multiplier,
+            drift_shock=drift_shock,
+        )
 
     def run_stress_test(
         self,
@@ -183,40 +231,9 @@ class MonteCarloStressTester:
         config: Optional[StressTestConfig] = None,
     ) -> MonteCarloStressResult:
         """Execute prescribed macroeconomic and market stress scenario."""
-        scenario_params = {
-            StressScenarioType.BASELINE: {
-                "volatility_shock": 1.0,
-                "drift_shock": 0.0,
-                "max_drawdown": 0.25,
-            },
-            StressScenarioType.VOLATILITY_SPIKE: {
-                "volatility_shock": 2.5,
-                "drift_shock": -0.05,
-                "max_drawdown": 0.30,
-            },
-            StressScenarioType.LIQUIDITY_CRUNCH: {
-                "volatility_shock": 3.0,
-                "drift_shock": -0.15,
-                "max_drawdown": 0.20,
-            },
-            StressScenarioType.RATE_SHOCK: {
-                "volatility_shock": 1.8,
-                "drift_shock": -0.10,
-                "max_drawdown": 0.25,
-            },
-            StressScenarioType.BLACK_SWAN: {
-                "volatility_shock": 3.5,
-                "drift_shock": -0.30,
-                "max_drawdown": 0.35,
-            },
-            StressScenarioType.HALLUCINATION_CASCADE: {
-                "volatility_shock": 2.2,
-                "drift_shock": -0.20,
-                "max_drawdown": 0.25,
-            },
-        }
-
-        params = scenario_params.get(scenario_type, scenario_params[StressScenarioType.BASELINE])
+        params = self._SCENARIO_PRESETS.get(
+            scenario_type, self._SCENARIO_PRESETS[StressScenarioType.BASELINE]
+        )
 
         cfg = config or StressTestConfig(
             scenario_type=scenario_type,

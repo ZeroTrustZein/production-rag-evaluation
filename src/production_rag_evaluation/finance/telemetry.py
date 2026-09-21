@@ -141,7 +141,22 @@ class RiskTelemetryCollector:
         alerts: List[str] = []
         structured_alerts: List[TelemetryAlert] = []
 
-        def _emit_alert(alert: TelemetryAlert) -> None:
+        def _trigger_alert(
+            prefix: str,
+            severity: AlertSeverity,
+            metric_name: str,
+            threshold: float,
+            observed_value: float,
+            message: str,
+        ) -> None:
+            alert = TelemetryAlert(
+                alert_id=f"alert-{prefix}-{uuid.uuid4().hex[:8]}",
+                severity=severity,
+                metric_name=metric_name,
+                threshold=threshold,
+                observed_value=observed_value,
+                message=message,
+            )
             alerts.append(alert.message)
             structured_alerts.append(alert)
             for listener in self._alert_listeners:
@@ -152,57 +167,44 @@ class RiskTelemetryCollector:
 
         # Hallucination alert
         if avg_hallucination > max_acceptable_hallucination_rate:
-            msg = (
-                f"HIGH_HALLUCINATION_RATE: Average hallucination rate {avg_hallucination:.1%} "
-                f"exceeds threshold {max_acceptable_hallucination_rate:.1%}"
-            )
-            _emit_alert(
-                TelemetryAlert(
-                    alert_id=f"alert-hal-{uuid.uuid4().hex[:8]}",
-                    severity=AlertSeverity.CRITICAL
-                    if avg_hallucination > 0.25
-                    else AlertSeverity.WARNING,
-                    metric_name="avg_hallucination_rate",
-                    threshold=max_acceptable_hallucination_rate,
-                    observed_value=avg_hallucination,
-                    message=msg,
-                )
+            _trigger_alert(
+                prefix="hal",
+                severity=AlertSeverity.CRITICAL if avg_hallucination > 0.25 else AlertSeverity.WARNING,
+                metric_name="avg_hallucination_rate",
+                threshold=max_acceptable_hallucination_rate,
+                observed_value=avg_hallucination,
+                message=(
+                    f"HIGH_HALLUCINATION_RATE: Average hallucination rate {avg_hallucination:.1%} "
+                    f"exceeds threshold {max_acceptable_hallucination_rate:.1%}"
+                ),
             )
 
         # Faithfulness alert
         if avg_faith < min_acceptable_faithfulness and total > 0:
-            msg = (
-                f"LOW_FAITHFULNESS: Average faithfulness {avg_faith:.1%} "
-                f"below threshold {min_acceptable_faithfulness:.1%}"
-            )
-            _emit_alert(
-                TelemetryAlert(
-                    alert_id=f"alert-faith-{uuid.uuid4().hex[:8]}",
-                    severity=AlertSeverity.CRITICAL
-                    if avg_faith < 0.50
-                    else AlertSeverity.WARNING,
-                    metric_name="avg_faithfulness",
-                    threshold=min_acceptable_faithfulness,
-                    observed_value=avg_faith,
-                    message=msg,
-                )
+            _trigger_alert(
+                prefix="faith",
+                severity=AlertSeverity.CRITICAL if avg_faith < 0.50 else AlertSeverity.WARNING,
+                metric_name="avg_faithfulness",
+                threshold=min_acceptable_faithfulness,
+                observed_value=avg_faith,
+                message=(
+                    f"LOW_FAITHFULNESS: Average faithfulness {avg_faith:.1%} "
+                    f"below threshold {min_acceptable_faithfulness:.1%}"
+                ),
             )
 
         # Latency alert
         if avg_latency > max_acceptable_latency_ms and total > 0:
-            msg = (
-                f"HIGH_LATENCY: Average evaluation latency {avg_latency:.1f}ms "
-                f"exceeds SLA {max_acceptable_latency_ms:.1f}ms"
-            )
-            _emit_alert(
-                TelemetryAlert(
-                    alert_id=f"alert-lat-{uuid.uuid4().hex[:8]}",
-                    severity=AlertSeverity.WARNING,
-                    metric_name="avg_latency_ms",
-                    threshold=max_acceptable_latency_ms,
-                    observed_value=avg_latency,
-                    message=msg,
-                )
+            _trigger_alert(
+                prefix="lat",
+                severity=AlertSeverity.WARNING,
+                metric_name="avg_latency_ms",
+                threshold=max_acceptable_latency_ms,
+                observed_value=avg_latency,
+                message=(
+                    f"HIGH_LATENCY: Average evaluation latency {avg_latency:.1f}ms "
+                    f"exceeds SLA {max_acceptable_latency_ms:.1f}ms"
+                ),
             )
 
         # Risk metrics evaluation
@@ -210,21 +212,16 @@ class RiskTelemetryCollector:
         if returns is not None and len(returns) > 1:
             risk_met = self.risk_engine.compute_all_metrics(returns)
             if risk_met.sharpe_ratio < min_acceptable_sharpe:
-                msg = (
-                    f"LOW_SHARPE_RATIO: Portfolio Sharpe {risk_met.sharpe_ratio:.2f} "
-                    f"is below risk floor {min_acceptable_sharpe:.2f}"
-                )
-                _emit_alert(
-                    TelemetryAlert(
-                        alert_id=f"alert-sharpe-{uuid.uuid4().hex[:8]}",
-                        severity=AlertSeverity.CRITICAL
-                        if risk_met.sharpe_ratio < 0.0
-                        else AlertSeverity.WARNING,
-                        metric_name="sharpe_ratio",
-                        threshold=min_acceptable_sharpe,
-                        observed_value=risk_met.sharpe_ratio,
-                        message=msg,
-                    )
+                _trigger_alert(
+                    prefix="sharpe",
+                    severity=AlertSeverity.CRITICAL if risk_met.sharpe_ratio < 0.0 else AlertSeverity.WARNING,
+                    metric_name="sharpe_ratio",
+                    threshold=min_acceptable_sharpe,
+                    observed_value=risk_met.sharpe_ratio,
+                    message=(
+                        f"LOW_SHARPE_RATIO: Portfolio Sharpe {risk_met.sharpe_ratio:.2f} "
+                        f"is below risk floor {min_acceptable_sharpe:.2f}"
+                    ),
                 )
 
         # Monte Carlo stress simulation
@@ -232,19 +229,16 @@ class RiskTelemetryCollector:
         if returns is not None and len(returns) > 1:
             mc_result = self.stress_tester.run_stress_test(returns, n_simulations=500)
             if not mc_result.stress_pass:
-                msg = (
-                    f"STRESS_TEST_FAILED: Worst case drawdown {mc_result.worst_case_drawdown:.1%} "
-                    "breached limits under stress"
-                )
-                _emit_alert(
-                    TelemetryAlert(
-                        alert_id=f"alert-stress-{uuid.uuid4().hex[:8]}",
-                        severity=AlertSeverity.CRITICAL,
-                        metric_name="worst_case_drawdown",
-                        threshold=0.25,
-                        observed_value=mc_result.worst_case_drawdown,
-                        message=msg,
-                    )
+                _trigger_alert(
+                    prefix="stress",
+                    severity=AlertSeverity.CRITICAL,
+                    metric_name="worst_case_drawdown",
+                    threshold=0.25,
+                    observed_value=mc_result.worst_case_drawdown,
+                    message=(
+                        f"STRESS_TEST_FAILED: Worst case drawdown {mc_result.worst_case_drawdown:.1%} "
+                        "breached limits under stress"
+                    ),
                 )
 
         health = SystemHealthStatus.HEALTHY

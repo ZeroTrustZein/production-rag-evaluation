@@ -18,6 +18,21 @@ from production_rag_evaluation.models.schemas import (
 class HallucinationDetector:
     """Detects factual contradictions, numerical distortions, and ungrounded statements."""
 
+    _MULTIPLIERS = {
+        "billion": 1e9,
+        "bn": 1e9,
+        "million": 1e6,
+        "m": 1e6,
+        "k": 1e3,
+        "trillion": 1e12,
+    }
+
+    _WORD_PATTERN = re.compile(r"\b\w+\b")
+    _TOKEN_PATTERN = re.compile(r"\b\w{3,}\b")
+    _TICKER_PATTERN = re.compile(r"\b[A-Z]{2,5}\b")
+    _YEAR_PATTERN = re.compile(r"\b(19\d\d|20\d\d)\b")
+    _CLAIM_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+")
+
     def __init__(self, numerical_tolerance_pct: float = 0.01) -> None:
         self.numerical_tolerance_pct = numerical_tolerance_pct
 
@@ -71,25 +86,15 @@ class HallucinationDetector:
             except ValueError:
                 continue
 
-            multiplier = 1.0
-            if unit in ("billion", "bn"):
-                multiplier = 1e9
-            elif unit in ("million", "m"):
-                multiplier = 1e6
-            elif unit == "k":
-                multiplier = 1e3
-            elif unit == "trillion":
-                multiplier = 1e12
-
+            multiplier = self._MULTIPLIERS.get(unit, 1.0)
             normalized_val = val * multiplier
             results.append((normalized_val, unit, match.group(0).strip()))
         return results
 
     def _split_into_claims(self, text: str) -> List[str]:
         """Segment text into individual sentences / factual claim candidates."""
-        raw_sentences = re.split(r"(?<=[.!?])\s+", text.strip())
-        claims = [s.strip() for s in raw_sentences if len(s.strip()) > 10]
-        return claims
+        raw_sentences = self._CLAIM_SPLIT_PATTERN.split(text.strip())
+        return [s.strip() for s in raw_sentences if len(s.strip()) > 10]
 
     def detect_numerical_distortions(
         self, generated_answer: str, context_chunks: List[DocumentChunk]
@@ -135,12 +140,12 @@ class HallucinationDetector:
         """Detect directional contradiction (e.g. context says 'declined 4%', answer claims 'grew')."""
         findings: List[HallucinationFinding] = []
         all_context_lower = " ".join(c.text for c in context_chunks).lower()
-        context_words = set(re.findall(r"\b\w+\b", all_context_lower))
+        context_words = set(self._WORD_PATTERN.findall(all_context_lower))
 
         gen_claims = self._split_into_claims(generated_answer)
         for claim in gen_claims:
             claim_lower = claim.lower()
-            claim_words = set(re.findall(r"\b\w+\b", claim_lower))
+            claim_words = set(self._WORD_PATTERN.findall(claim_lower))
 
             has_pos = bool(claim_words & self._positive_directions)
             has_neg = bool(claim_words & self._negative_directions)
@@ -182,11 +187,11 @@ class HallucinationDetector:
         """Flag claims whose content words lack token grounding in context."""
         findings: List[HallucinationFinding] = []
         all_context_text = " ".join(c.text for c in context_chunks).lower()
-        context_tokens = set(re.findall(r"\b\w{3,}\b", all_context_text))
+        context_tokens = set(self._TOKEN_PATTERN.findall(all_context_text))
 
         claims = self._split_into_claims(generated_answer)
         for claim in claims:
-            claim_tokens = [w for w in re.findall(r"\b\w{3,}\b", claim.lower())]
+            claim_tokens = self._TOKEN_PATTERN.findall(claim.lower())
             if not claim_tokens:
                 continue
 
@@ -217,10 +222,10 @@ class HallucinationDetector:
 
         context_tickers = {c.ticker.upper() for c in context_chunks if c.ticker}
         all_context_text = " ".join(c.text for c in context_chunks)
-        context_words_upper = set(re.findall(r"\b[A-Z]{2,5}\b", all_context_text))
+        context_words_upper = set(self._TICKER_PATTERN.findall(all_context_text))
 
         # Look for uppercase tickers in answer
-        gen_caps = set(re.findall(r"\b[A-Z]{2,5}\b", generated_answer))
+        gen_caps = set(self._TICKER_PATTERN.findall(generated_answer))
         candidate_tickers = gen_caps - self._excluded_ticker_tokens
 
         for token in sorted(candidate_tickers):
@@ -251,11 +256,11 @@ class HallucinationDetector:
         context_full = " ".join(
             f"{c.text} {c.period or ''}" for c in context_chunks
         )
-        context_years = set(re.findall(r"\b(19\d\d|20\d\d)\b", context_full))
+        context_years = set(self._YEAR_PATTERN.findall(context_full))
         if not context_years:
             return findings
 
-        gen_years = set(re.findall(r"\b(19\d\d|20\d\d)\b", generated_answer))
+        gen_years = set(self._YEAR_PATTERN.findall(generated_answer))
         mismatched_years = gen_years - context_years
 
         for yr in sorted(mismatched_years):
@@ -285,13 +290,13 @@ class HallucinationDetector:
         for idx, claim in enumerate(claims, 1):
             claim_id = f"claim-{idx:03d}"
             claim_lower = claim.lower()
-            claim_tokens = set(re.findall(r"\b\w{3,}\b", claim_lower))
+            claim_tokens = set(self._TOKEN_PATTERN.findall(claim_lower))
 
             # Identify supporting chunks
             evidence_chunk_ids: List[str] = []
             max_chunk_overlap = 0.0
             for chunk in context_chunks:
-                c_tokens = set(re.findall(r"\b\w{3,}\b", chunk.text.lower()))
+                c_tokens = set(self._TOKEN_PATTERN.findall(chunk.text.lower()))
                 overlap = len(claim_tokens & c_tokens) / max(len(claim_tokens), 1)
                 if overlap > 0.10:
                     evidence_chunk_ids.append(chunk.chunk_id)

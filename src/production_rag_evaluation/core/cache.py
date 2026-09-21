@@ -89,11 +89,14 @@ class SemanticCache:
             return 0.0
         return float(np.dot(a, b) / (norm_a * norm_b))
 
+    def _hash_key(self, query_text: str) -> str:
+        """Compute deterministic SHA-256 hash key for normalized query string."""
+        return hashlib.sha256(query_text.strip().lower().encode("utf-8")).hexdigest()
+
     def get(self, query_text: str) -> Optional[Tuple[Any, float]]:
         """Look up query. Returns (cached_value, similarity_score) or None."""
         self._purge_expired()
-        norm_query = query_text.strip().lower()
-        exact_key = hashlib.sha256(norm_query.encode()).hexdigest()
+        exact_key = self._hash_key(query_text)
 
         # 1. Exact match check
         if exact_key in self._cache:
@@ -131,8 +134,7 @@ class SemanticCache:
     def put(self, query_text: str, value: Any) -> str:
         """Store item in semantic cache with LRU eviction."""
         self._purge_expired()
-        norm_query = query_text.strip().lower()
-        key = hashlib.sha256(norm_query.encode()).hexdigest()
+        key = self._hash_key(query_text)
         emb = self._embedder.embed(query_text)
 
         if key in self._cache:
