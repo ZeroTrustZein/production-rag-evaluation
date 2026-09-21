@@ -31,9 +31,7 @@ class RAGEvaluator:
             max_entries=cache_max_entries,
             ttl_seconds=cache_ttl_seconds,
         )
-        self.detector = HallucinationDetector(
-            numerical_tolerance_pct=numerical_tolerance_pct
-        )
+        self.detector = HallucinationDetector(numerical_tolerance_pct=numerical_tolerance_pct)
         self.graph = EvaluationGraph(detector=self.detector)
 
     def evaluate(

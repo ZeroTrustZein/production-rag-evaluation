@@ -29,7 +29,7 @@ class TextEmbedder:
             vec[idx1] += 1.0
             # Bigram hash if available
             if i < len(words) - 1:
-                bigram = f"{word}_{words[i+1]}"
+                bigram = f"{word}_{words[i + 1]}"
                 idx2 = int(hashlib.sha256(bigram.encode()).hexdigest(), 16) % self.vector_dim
                 vec[idx2] += 1.5
 

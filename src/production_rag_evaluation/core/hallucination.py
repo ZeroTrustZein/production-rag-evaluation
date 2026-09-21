@@ -27,10 +27,26 @@ class HallucinationDetector:
 
         # Directional sentiment terms for contradiction checking
         self._positive_directions = {
-            "increased", "grew", "growth", "rose", "expanded", "up", "surpassed", "outperformed", "higher"
+            "increased",
+            "grew",
+            "growth",
+            "rose",
+            "expanded",
+            "up",
+            "surpassed",
+            "outperformed",
+            "higher",
         }
         self._negative_directions = {
-            "decreased", "fell", "dropped", "declined", "contracted", "down", "missed", "lower", "slumped"
+            "decreased",
+            "fell",
+            "dropped",
+            "declined",
+            "contracted",
+            "down",
+            "missed",
+            "lower",
+            "slumped",
         }
 
     def _extract_numerical_values(self, text: str) -> List[Tuple[float, str, str]]:
@@ -97,7 +113,7 @@ class HallucinationDetector:
                         claim_text=f"Reported value: {g_raw}",
                         reference_text=f"Available context numbers: {[c[2] for c in context_numbers[:5]]}",
                         confidence=0.92,
-                        explanation=f"Generated value '{g_raw}' does not match any financial figure in retrieved context within {self.numerical_tolerance_pct*100}% tolerance.",
+                        explanation=f"Generated value '{g_raw}' does not match any financial figure in retrieved context within {self.numerical_tolerance_pct * 100}% tolerance.",
                     )
                 )
         return findings

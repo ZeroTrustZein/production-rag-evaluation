@@ -97,7 +97,9 @@ def test_hallucination_detector_numerical_distortion(sample_chunk_apple: Documen
 
     # Hallucinated answer ($450.0 billion instead of $391.0 billion)
     hallucinated_answer = "Apple reported net sales of $450.0 billion in fiscal year 2024."
-    findings_hallucinated = detector.detect_numerical_distortions(hallucinated_answer, [sample_chunk_apple])
+    findings_hallucinated = detector.detect_numerical_distortions(
+        hallucinated_answer, [sample_chunk_apple]
+    )
     assert len(findings_hallucinated) > 0
     assert findings_hallucinated[0].finding_type == HallucinationType.NUMERICAL_DISTORTION
     assert findings_hallucinated[0].severity == Severity.HIGH
@@ -109,7 +111,9 @@ def test_hallucination_detector_contradiction(sample_chunk_apple: DocumentChunk)
 
     # Context says "up 2%", answer claims "sales dropped and declined"
     contradictory_answer = "Apple net sales dropped and declined in fiscal 2024."
-    findings = detector.detect_directional_contradictions(contradictory_answer, [sample_chunk_apple])
+    findings = detector.detect_directional_contradictions(
+        contradictory_answer, [sample_chunk_apple]
+    )
     assert len(findings) > 0
     assert findings[0].finding_type == HallucinationType.CONTRADICTION
     assert findings[0].severity == Severity.CRITICAL
@@ -119,7 +123,9 @@ def test_evaluation_graph_and_rag_evaluator(sample_chunk_apple: DocumentChunk):
     """Test full evaluation pipeline DAG and overall pass/fail scoring."""
     evaluator = RAGEvaluator()
 
-    q = RAGQuery(query_id="q1", query_text="What was Apple's total net sales in 2024?", ticker="AAPL")
+    q = RAGQuery(
+        query_id="q1", query_text="What was Apple's total net sales in 2024?", ticker="AAPL"
+    )
     citation = Citation(chunk_id=sample_chunk_apple.chunk_id, quote="$391.0 billion")
 
     # High quality response
@@ -211,9 +217,12 @@ def test_cli_subcommands(cli_runner: CliRunner, sample_chunk_apple: DocumentChun
         cli,
         [
             "evaluate",
-            "-q", "What were net sales?",
-            "-a", "Net sales were $391.0 billion.",
-            "-c", sample_chunk_apple.text,
+            "-q",
+            "What were net sales?",
+            "-a",
+            "Net sales were $391.0 billion.",
+            "-c",
+            sample_chunk_apple.text,
             "--json-out",
         ],
     )

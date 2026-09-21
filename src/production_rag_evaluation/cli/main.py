@@ -66,11 +66,31 @@ def evaluate_cmd(query: str, answer: str, context: str, ticker: str, json_out: b
     def status_label(val: float, threshold: float = 0.75) -> str:
         return "[green]PASS[/green]" if val >= threshold else "[red]FAIL[/red]"
 
-    table.add_row("Faithfulness", f"{metrics.faithfulness_score:.2%}", status_label(metrics.faithfulness_score))
-    table.add_row("Answer Relevance", f"{metrics.answer_relevance_score:.2%}", status_label(metrics.answer_relevance_score, 0.60))
-    table.add_row("Context Recall", f"{metrics.context_recall_score:.2%}", status_label(metrics.context_recall_score, 0.60))
-    table.add_row("Hallucination Rate", f"{metrics.hallucination_rate:.2%}", "[green]LOW[/green]" if metrics.hallucination_rate < 0.2 else "[red]HIGH[/red]")
-    table.add_row("Overall Pass", str(metrics.overall_pass), "[green]YES[/green]" if metrics.overall_pass else "[red]NO[/red]")
+    table.add_row(
+        "Faithfulness",
+        f"{metrics.faithfulness_score:.2%}",
+        status_label(metrics.faithfulness_score),
+    )
+    table.add_row(
+        "Answer Relevance",
+        f"{metrics.answer_relevance_score:.2%}",
+        status_label(metrics.answer_relevance_score, 0.60),
+    )
+    table.add_row(
+        "Context Recall",
+        f"{metrics.context_recall_score:.2%}",
+        status_label(metrics.context_recall_score, 0.60),
+    )
+    table.add_row(
+        "Hallucination Rate",
+        f"{metrics.hallucination_rate:.2%}",
+        "[green]LOW[/green]" if metrics.hallucination_rate < 0.2 else "[red]HIGH[/red]",
+    )
+    table.add_row(
+        "Overall Pass",
+        str(metrics.overall_pass),
+        "[green]YES[/green]" if metrics.overall_pass else "[red]NO[/red]",
+    )
     table.add_row("Latency", f"{metrics.evaluation_latency_ms:.1f} ms", "OK")
 
     console.print(table)
@@ -92,7 +112,10 @@ def risk_metrics_cmd(returns: Optional[str], risk_free: float, json_out: bool) -
         arr = np.array([float(x.strip()) for x in returns.split(",")], dtype=np.float64)
     else:
         # Default representative daily returns
-        arr = np.array([0.005, -0.003, 0.008, 0.002, -0.001, 0.006, 0.004, -0.002, 0.003, 0.001], dtype=np.float64)
+        arr = np.array(
+            [0.005, -0.003, 0.008, 0.002, -0.001, 0.006, 0.004, -0.002, 0.003, 0.001],
+            dtype=np.float64,
+        )
 
     engine = FinancialRiskEngine(risk_free_rate=risk_free)
     metrics = engine.compute_all_metrics(arr)
@@ -146,7 +169,9 @@ def stress_test_cmd(simulations: int, horizon: int, shock: float, json_out: bool
     table.add_row("95th Percentile Terminal ($)", f"${result.p95_terminal:.2f}")
     table.add_row("Mean Terminal ($)", f"${result.mean_terminal:.2f}")
     table.add_row("Worst Case Drawdown", f"{result.worst_case_drawdown:.2%}")
-    table.add_row("Stress Test Passed", "[green]YES[/green]" if result.stress_pass else "[red]NO[/red]")
+    table.add_row(
+        "Stress Test Passed", "[green]YES[/green]" if result.stress_pass else "[red]NO[/red]"
+    )
 
     console.print(table)
 
@@ -157,9 +182,15 @@ def telemetry_cmd(json_out: bool) -> None:
     """Show end-to-end telemetry status combining RAG quality and financial risk."""
     collector = RiskTelemetryCollector()
     # Mock some history
-    chunk = DocumentChunk(chunk_id="c1", text="Apple revenue was $85.8 billion, up 5% year-over-year.", ticker="AAPL")
+    chunk = DocumentChunk(
+        chunk_id="c1", text="Apple revenue was $85.8 billion, up 5% year-over-year.", ticker="AAPL"
+    )
     q = RAGQuery(query_id="q1", query_text="What was Apple revenue?", ticker="AAPL")
-    resp = RAGResponse(query_id="q1", generated_answer="Apple reported revenue of $85.8 billion.", retrieved_chunks=[chunk])
+    resp = RAGResponse(
+        query_id="q1",
+        generated_answer="Apple reported revenue of $85.8 billion.",
+        retrieved_chunks=[chunk],
+    )
     m = collector.evaluator.evaluate(q, resp)
     collector.record_evaluation(m)
 
@@ -182,6 +213,8 @@ def telemetry_cmd(json_out: bool) -> None:
         table.add_row("Portfolio Sharpe Ratio", f"{rep.risk_metrics.sharpe_ratio:.2f}")
         table.add_row("Portfolio Sortino Ratio", f"{rep.risk_metrics.sortino_ratio:.2f}")
         table.add_row("Portfolio Max Drawdown", f"{rep.risk_metrics.max_drawdown:.2%}")
-    table.add_row("Active Alerts", ", ".join(rep.alerts_triggered) if rep.alerts_triggered else "None")
+    table.add_row(
+        "Active Alerts", ", ".join(rep.alerts_triggered) if rep.alerts_triggered else "None"
+    )
 
     console.print(table)

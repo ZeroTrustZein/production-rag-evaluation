@@ -78,9 +78,7 @@ class EvaluationGraph:
 
         state.verified_citations = verified
         if state.response.citations:
-            state.citation_grounding_score = round(
-                len(verified) / len(state.response.citations), 4
-            )
+            state.citation_grounding_score = round(len(verified) / len(state.response.citations), 4)
         else:
             state.citation_grounding_score = 1.0 if not state.response.retrieved_chunks else 0.85
         state.execution_trace.append("verify_citations")
@@ -100,8 +98,24 @@ class EvaluationGraph:
     def _compute_relevance(self, state: EvaluationState) -> None:
         import re
 
-        stopwords = {"what", "was", "is", "in", "of", "for", "the", "a", "an", "to", "and", "how", "did"}
-        q_tokens = [w for w in re.findall(r"\b\w+\b", state.query.query_text.lower()) if w not in stopwords]
+        stopwords = {
+            "what",
+            "was",
+            "is",
+            "in",
+            "of",
+            "for",
+            "the",
+            "a",
+            "an",
+            "to",
+            "and",
+            "how",
+            "did",
+        }
+        q_tokens = [
+            w for w in re.findall(r"\b\w+\b", state.query.query_text.lower()) if w not in stopwords
+        ]
         a_tokens = [w for w in re.findall(r"\b\w+\b", state.response.generated_answer.lower())]
 
         if not q_tokens:
@@ -114,7 +128,9 @@ class EvaluationGraph:
         # Context precision and recall heuristics based on retrieved chunk relevance
         if state.response.retrieved_chunks:
             relevant_chunks = sum(
-                1 for c in state.response.retrieved_chunks if any(w in c.text.lower() for w in q_tokens)
+                1
+                for c in state.response.retrieved_chunks
+                if any(w in c.text.lower() for w in q_tokens)
             )
             state.context_precision_score = round(
                 relevant_chunks / len(state.response.retrieved_chunks), 4
