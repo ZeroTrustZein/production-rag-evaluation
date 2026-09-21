@@ -221,9 +221,7 @@ class FinancialRiskEngine:
         ir = (mean_active / tracking_error) * np.sqrt(ppy)
         return round(float(ir), 4)
 
-    def calculate_omega_ratio(
-        self, returns: np.ndarray, threshold: float = 0.0
-    ) -> float:
+    def calculate_omega_ratio(self, returns: np.ndarray, threshold: float = 0.0) -> float:
         """Compute Omega Ratio: probability-weighted ratio of gains vs losses."""
         valid = self._clean_returns(returns)
         if len(valid) == 0:

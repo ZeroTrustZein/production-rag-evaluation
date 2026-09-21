@@ -98,7 +98,9 @@ def cli() -> None:
 @cli.command(name="evaluate")
 @click.option("--query", "-q", required=True, help="Input financial question/query or @file.")
 @click.option("--answer", "-a", required=True, help="Generated answer to evaluate or @file.")
-@click.option("--context", "-c", required=True, help="Retrieved ground-truth text context or @file.")
+@click.option(
+    "--context", "-c", required=True, help="Retrieved ground-truth text context or @file."
+)
 @click.option("--ticker", "-t", default="AAPL", help="Stock ticker symbol.")
 @click.option("--period", "-p", default="FY2024", help="Financial reporting period (e.g. Q3 2024).")
 @click.option(
@@ -115,7 +117,9 @@ def cli() -> None:
     help="Expected numerical target (e.g., 'net_sales=391.0e9' or '391.0e9'). Can be repeated.",
 )
 @click.option("--no-cache", is_flag=True, default=False, help="Disable semantic evaluation cache.")
-@click.option("--output", "-o", type=click.Path(writable=True), help="Path to write evaluation JSON report.")
+@click.option(
+    "--output", "-o", type=click.Path(writable=True), help="Path to write evaluation JSON report."
+)
 @click.option("--json-out", is_flag=True, help="Output raw JSON results.")
 def evaluate_cmd(
     query: str,
@@ -172,7 +176,9 @@ def evaluate_cmd(
         return
 
     # Rich formatted report
-    status_str = "[bold green]PASS[/bold green]" if metrics.overall_pass else "[bold red]FAIL[/bold red]"
+    status_str = (
+        "[bold green]PASS[/bold green]" if metrics.overall_pass else "[bold red]FAIL[/bold red]"
+    )
     console.print(
         Panel.fit(
             f"[bold]RAG Evaluation Report[/bold] | Ticker: [cyan]{ticker}[/cyan] | Mode: [magenta]{eval_mode.value}[/magenta] | Status: {status_str}",
@@ -252,7 +258,9 @@ def evaluate_cmd(
         console.print("\n[bold yellow]Hallucination Findings Detected:[/bold yellow]")
         for f in metrics.findings:
             sev_color = "red" if f.severity.value in ("HIGH", "CRITICAL") else "yellow"
-            console.print(f" - [[{sev_color}]{f.severity.value}[/{sev_color}]] [cyan]{f.finding_type.value}[/cyan]: {f.claim_text}")
+            console.print(
+                f" - [[{sev_color}]{f.severity.value}[/{sev_color}]] [cyan]{f.finding_type.value}[/cyan]: {f.claim_text}"
+            )
             console.print(f"   Reason: {f.explanation}")
             if f.impact_on_risk:
                 console.print(f"   Financial Risk Impact: [italic]{f.impact_on_risk}[/italic]")
@@ -264,8 +272,20 @@ def evaluate_cmd(
 # 2. BATCH EVALUATE COMMAND
 # -------------------------------------------------------------------------
 @cli.command(name="batch-evaluate")
-@click.option("--input", "-i", "input_file", required=True, type=click.Path(exists=True), help="Input JSON or JSONL file with queries.")
-@click.option("--output", "-o", type=click.Path(writable=True), help="Path to write batch evaluation JSON summary.")
+@click.option(
+    "--input",
+    "-i",
+    "input_file",
+    required=True,
+    type=click.Path(exists=True),
+    help="Input JSON or JSONL file with queries.",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(writable=True),
+    help="Path to write batch evaluation JSON summary.",
+)
 @click.option(
     "--mode",
     "-m",
@@ -387,14 +407,19 @@ def batch_evaluate_cmd(
     summary_panel.add_column(style="bold cyan")
     summary_panel.add_column(style="bold white")
     summary_panel.add_row("Total Queries:", str(summary.total_queries))
-    summary_panel.add_row("Passed / Failed:", f"[green]{summary.passed_queries}[/green] / [red]{summary.failed_queries}[/red]")
+    summary_panel.add_row(
+        "Passed / Failed:",
+        f"[green]{summary.passed_queries}[/green] / [red]{summary.failed_queries}[/red]",
+    )
     summary_panel.add_row("Pass Rate:", f"{summary.pass_rate:.1%}")
     summary_panel.add_row("Mean Faithfulness:", f"{summary.mean_faithfulness:.1%}")
     summary_panel.add_row("Mean Relevance:", f"{summary.mean_relevance:.1%}")
     summary_panel.add_row("Mean Latency:", f"{summary.mean_latency_ms:.1f} ms")
     summary_panel.add_row("P95 Latency:", f"{summary.p95_latency_ms:.1f} ms")
 
-    console.print(Panel(summary_panel, title=f"Batch Summary - {summary.batch_id}", border_style="green"))
+    console.print(
+        Panel(summary_panel, title=f"Batch Summary - {summary.batch_id}", border_style="green")
+    )
 
 
 # -------------------------------------------------------------------------
@@ -420,7 +445,12 @@ def _run_audit(answer: str, context: str, ticker: str, tolerance: float, json_ou
         return
 
     if not findings:
-        console.print(Panel("[bold green]Audit Clean: No hallucinations or distortions detected.[/bold green]", border_style="green"))
+        console.print(
+            Panel(
+                "[bold green]Audit Clean: No hallucinations or distortions detected.[/bold green]",
+                border_style="green",
+            )
+        )
         return
 
     table = Table(title=f"Financial Hallucination Audit Findings ({ticker})")
@@ -445,7 +475,9 @@ def _run_audit(answer: str, context: str, ticker: str, tolerance: float, json_ou
 
 @cli.command(name="audit")
 @click.option("--answer", "-a", required=True, help="Generated answer text or @file.")
-@click.option("--context", "-c", required=True, help="Ground truth reference context text or @file.")
+@click.option(
+    "--context", "-c", required=True, help="Ground truth reference context text or @file."
+)
 @click.option("--ticker", "-t", default="AAPL", help="Stock ticker symbol.")
 @click.option("--tolerance", default=0.01, help="Numerical tolerance ratio (e.g. 0.01 for 1%).")
 @click.option("--json-out", is_flag=True, help="Output raw JSON results.")
@@ -456,11 +488,15 @@ def audit_cmd(answer: str, context: str, ticker: str, tolerance: float, json_out
 
 @cli.command(name="detect-hallucinations")
 @click.option("--answer", "-a", required=True, help="Generated answer text or @file.")
-@click.option("--context", "-c", required=True, help="Ground truth reference context text or @file.")
+@click.option(
+    "--context", "-c", required=True, help="Ground truth reference context text or @file."
+)
 @click.option("--ticker", "-t", default="AAPL", help="Stock ticker symbol.")
 @click.option("--tolerance", default=0.01, help="Numerical tolerance ratio (e.g. 0.01 for 1%).")
 @click.option("--json-out", is_flag=True, help="Output raw JSON results.")
-def detect_hallucinations_cmd(answer: str, context: str, ticker: str, tolerance: float, json_out: bool) -> None:
+def detect_hallucinations_cmd(
+    answer: str, context: str, ticker: str, tolerance: float, json_out: bool
+) -> None:
     """Detect numerical distortions, contradictions, and entity swaps (alias for audit)."""
     _run_audit(answer, context, ticker, tolerance, json_out)
 
@@ -469,7 +505,9 @@ def detect_hallucinations_cmd(answer: str, context: str, ticker: str, tolerance:
 # 4. RISK METRICS COMMAND
 # -------------------------------------------------------------------------
 @cli.command(name="risk-metrics")
-@click.option("--returns", "-r", default=None, help="Comma-separated decimal daily returns or @file.")
+@click.option(
+    "--returns", "-r", default=None, help="Comma-separated decimal daily returns or @file."
+)
 @click.option("--benchmark", "-b", default=None, help="Comma-separated benchmark returns or @file.")
 @click.option("--risk-free", default=0.045, help="Annualized risk-free rate.")
 @click.option("--target-return", default=0.0, help="Target minimum acceptable return for Sortino.")
@@ -541,7 +579,14 @@ def risk_metrics_cmd(
 @click.option(
     "--scenario",
     type=click.Choice(
-        ["BASELINE", "VOLATILITY_SPIKE", "LIQUIDITY_CRUNCH", "RATE_SHOCK", "BLACK_SWAN", "HALLUCINATION_CASCADE"],
+        [
+            "BASELINE",
+            "VOLATILITY_SPIKE",
+            "LIQUIDITY_CRUNCH",
+            "RATE_SHOCK",
+            "BLACK_SWAN",
+            "HALLUCINATION_CASCADE",
+        ],
         case_sensitive=False,
     ),
     default="BASELINE",
@@ -573,7 +618,9 @@ def stress_test_cmd(
     """Run Monte Carlo stress testing on simulated financial trajectories."""
     base_returns = _parse_float_array(returns)
     if base_returns is None or len(base_returns) == 0:
-        base_returns = np.array([0.002, -0.004, 0.001, -0.002, 0.005, 0.003, -0.001], dtype=np.float64)
+        base_returns = np.array(
+            [0.002, -0.004, 0.001, -0.002, 0.005, 0.003, -0.001], dtype=np.float64
+        )
 
     scenario_type = StressScenarioType[scenario.upper()]
     tester = MonteCarloStressTester(random_seed=seed)
@@ -591,7 +638,9 @@ def stress_test_cmd(
     if scenario_type != StressScenarioType.BASELINE:
         result = tester.run_scenario(base_returns, scenario_type=scenario_type, config=config)
     elif model.lower() == "fat-tailed":
-        result = tester.run_scenario(base_returns, scenario_type=StressScenarioType.BLACK_SWAN, config=config)
+        result = tester.run_scenario(
+            base_returns, scenario_type=StressScenarioType.BLACK_SWAN, config=config
+        )
     else:
         result = tester.run_stress_test(
             base_returns,
@@ -606,7 +655,9 @@ def stress_test_cmd(
         click.echo(result.model_dump_json(indent=2))
         return
 
-    table = Table(title=f"Monte Carlo Stress Simulation ({simulations} paths, {horizon}d, {scenario_type.value})")
+    table = Table(
+        title=f"Monte Carlo Stress Simulation ({simulations} paths, {horizon}d, {scenario_type.value})"
+    )
     table.add_column("Parameter / Outcome", style="cyan")
     table.add_column("Value", style="magenta")
 
@@ -630,9 +681,19 @@ def stress_test_cmd(
 # 6. TELEMETRY COMMAND
 # -------------------------------------------------------------------------
 @cli.command(name="telemetry")
-@click.option("--returns", "-r", default=None, help="Comma-separated decimal daily returns or @file.")
-@click.option("--history-file", type=click.Path(exists=True), help="Path to JSON file containing past EvaluationMetrics.")
-@click.option("--drift-metric", default=None, help="Detect statistical drift for given metric (e.g. faithfulness_score).")
+@click.option(
+    "--returns", "-r", default=None, help="Comma-separated decimal daily returns or @file."
+)
+@click.option(
+    "--history-file",
+    type=click.Path(exists=True),
+    help="Path to JSON file containing past EvaluationMetrics.",
+)
+@click.option(
+    "--drift-metric",
+    default=None,
+    help="Detect statistical drift for given metric (e.g. faithfulness_score).",
+)
 @click.option("--status-only", is_flag=True, help="Print only system health status string.")
 @click.option("--json-out", is_flag=True, help="Output raw JSON results.")
 def telemetry_cmd(
@@ -653,7 +714,9 @@ def telemetry_cmd(
     else:
         # Default representative baseline record
         chunk = DocumentChunk(
-            chunk_id="c1", text="Apple revenue was $85.8 billion, up 5% year-over-year.", ticker="AAPL"
+            chunk_id="c1",
+            text="Apple revenue was $85.8 billion, up 5% year-over-year.",
+            ticker="AAPL",
         )
         q = RAGQuery(query_id="q1", query_text="What was Apple revenue?", ticker="AAPL")
         resp = RAGResponse(
@@ -710,7 +773,8 @@ def telemetry_cmd(
         table.add_row("Portfolio Max Drawdown", f"{rep.risk_metrics.max_drawdown:.2%}")
 
     table.add_row(
-        "Active Alerts", ", ".join(rep.alerts_triggered) if rep.alerts_triggered else "[green]None[/green]"
+        "Active Alerts",
+        ", ".join(rep.alerts_triggered) if rep.alerts_triggered else "[green]None[/green]",
     )
 
     console.print(table)
@@ -721,7 +785,10 @@ def telemetry_cmd(
         drift_table = Table(title=f"Metric Drift Check: {drift_metric}")
         drift_table.add_column("Property", style="cyan")
         drift_table.add_column("Value", style="magenta")
-        drift_table.add_row("Drift Detected", "[red]YES[/red]" if drift_res.get("drift_detected") else "[green]NO[/green]")
+        drift_table.add_row(
+            "Drift Detected",
+            "[red]YES[/red]" if drift_res.get("drift_detected") else "[green]NO[/green]",
+        )
         drift_table.add_row("p-value", str(drift_res.get("p_value")))
         if "baseline_mean" in drift_res:
             drift_table.add_row("Baseline Mean", f"{drift_res['baseline_mean']:.4f}")

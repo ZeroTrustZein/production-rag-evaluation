@@ -207,7 +207,9 @@ class TestEvaluationGraphDAG:
 
     def test_dag_execution_trace_order(self, sample_chunk_apple: DocumentChunk) -> None:
         graph = EvaluationGraph()
-        q = RAGQuery(query_id="q-001", query_text="What were Apple's net sales in 2024?", ticker="AAPL")
+        q = RAGQuery(
+            query_id="q-001", query_text="What were Apple's net sales in 2024?", ticker="AAPL"
+        )
         r = RAGResponse(
             query_id="q-001",
             generated_answer="Apple reported net sales of $391.0 billion.",
@@ -271,7 +273,9 @@ class TestEvaluationGraphDAG:
         assert str(391.0e9) in target_checks
         assert target_checks[str(391.0e9)]["matched"] is True
 
-    def test_structured_targets_missed_triggers_finding(self, sample_chunk_apple: DocumentChunk) -> None:
+    def test_structured_targets_missed_triggers_finding(
+        self, sample_chunk_apple: DocumentChunk
+    ) -> None:
         graph = EvaluationGraph()
         target = NumericalTarget(
             metric_name="operating_cash_flow",

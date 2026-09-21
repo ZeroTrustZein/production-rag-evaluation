@@ -116,8 +116,7 @@ class TestCoreEdgeCases:
         assert "40.0" in metrics.metadata.get("target_checks", {})
         assert metrics.metadata["target_checks"]["40.0"]["matched"] is False
         assert any(
-            f.finding_type == HallucinationType.NUMERICAL_DISTORTION
-            and "40.0" in f.claim_text
+            f.finding_type == HallucinationType.NUMERICAL_DISTORTION and "40.0" in f.claim_text
             for f in metrics.findings
         )
 
@@ -201,7 +200,11 @@ class TestHallucinationDetectorEdgeCases:
 
     def test_context_without_years_temporal(self):
         detector = HallucinationDetector()
-        context = [DocumentChunk(chunk_id="c1", text="Revenue grew significantly over last quarter.", ticker="AAPL")]
+        context = [
+            DocumentChunk(
+                chunk_id="c1", text="Revenue grew significantly over last quarter.", ticker="AAPL"
+            )
+        ]
         findings = detector.detect_temporal_mismatches("In 2024 it grew.", context)
         assert len(findings) == 0
 
@@ -220,7 +223,9 @@ class TestHallucinationDetectorEdgeCases:
         ]
         # Partial overlap (between 0.20 and 0.35) -> AMBIGUOUS
         # "revenue eighty billion" in 10-word claim
-        claim_ambiguous = "Overall operating performance was commendable for stakeholders and consumers."
+        claim_ambiguous = (
+            "Overall operating performance was commendable for stakeholders and consumers."
+        )
         results = detector.verify_claims([claim_ambiguous], context)
         assert len(results) == 1
         assert results[0].status in (ClaimStatus.AMBIGUOUS, ClaimStatus.UNGROUNDED)
@@ -241,6 +246,7 @@ class TestHallucinationDetectorEdgeCases:
 
     def test_numerical_extraction_regex_value_error(self):
         from unittest.mock import MagicMock
+
         detector = HallucinationDetector()
         mock_match = MagicMock()
         mock_match.group.side_effect = lambda idx: "invalid_num" if idx == 1 else ""
@@ -367,6 +373,7 @@ class TestStressTestingAndTelemetryEdgeCases:
 
         # Trigger an alert by recording an evaluation with high hallucination rate
         from production_rag_evaluation.models.schemas import EvaluationMetrics
+
         finding = HallucinationFinding(
             finding_type=HallucinationType.CONTRADICTION,
             severity=Severity.CRITICAL,

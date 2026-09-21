@@ -71,10 +71,18 @@ class RiskTelemetryCollector:
 
         window = self._history[-window_size:]
         return {
-            "rolling_faithfulness": round(float(np.mean([m.faithfulness_score for m in window])), 4),
-            "rolling_relevance": round(float(np.mean([m.answer_relevance_score for m in window])), 4),
-            "rolling_hallucination_rate": round(float(np.mean([m.hallucination_rate for m in window])), 4),
-            "rolling_latency_ms": round(float(np.mean([m.evaluation_latency_ms for m in window])), 2),
+            "rolling_faithfulness": round(
+                float(np.mean([m.faithfulness_score for m in window])), 4
+            ),
+            "rolling_relevance": round(
+                float(np.mean([m.answer_relevance_score for m in window])), 4
+            ),
+            "rolling_hallucination_rate": round(
+                float(np.mean([m.hallucination_rate for m in window])), 4
+            ),
+            "rolling_latency_ms": round(
+                float(np.mean([m.evaluation_latency_ms for m in window])), 2
+            ),
         }
 
     def detect_drift(
@@ -169,7 +177,9 @@ class RiskTelemetryCollector:
         if avg_hallucination > max_acceptable_hallucination_rate:
             _trigger_alert(
                 prefix="hal",
-                severity=AlertSeverity.CRITICAL if avg_hallucination > 0.25 else AlertSeverity.WARNING,
+                severity=AlertSeverity.CRITICAL
+                if avg_hallucination > 0.25
+                else AlertSeverity.WARNING,
                 metric_name="avg_hallucination_rate",
                 threshold=max_acceptable_hallucination_rate,
                 observed_value=avg_hallucination,
@@ -214,7 +224,9 @@ class RiskTelemetryCollector:
             if risk_met.sharpe_ratio < min_acceptable_sharpe:
                 _trigger_alert(
                     prefix="sharpe",
-                    severity=AlertSeverity.CRITICAL if risk_met.sharpe_ratio < 0.0 else AlertSeverity.WARNING,
+                    severity=AlertSeverity.CRITICAL
+                    if risk_met.sharpe_ratio < 0.0
+                    else AlertSeverity.WARNING,
                     metric_name="sharpe_ratio",
                     threshold=min_acceptable_sharpe,
                     observed_value=risk_met.sharpe_ratio,

@@ -119,12 +119,17 @@ class TestRAGToRiskTelemetryIntegration:
             confidence_score=0.45,
         )
 
-        metrics = evaluator.evaluate(query, corrupted_response, mode=EvaluationMode.FINANCIAL_STRICT)
+        metrics = evaluator.evaluate(
+            query, corrupted_response, mode=EvaluationMode.FINANCIAL_STRICT
+        )
         assert metrics.overall_pass is False
         assert len(metrics.findings) >= 2
 
         finding_types = {f.finding_type for f in metrics.findings}
-        assert HallucinationType.ENTITY_SWAP in finding_types or HallucinationType.NUMERICAL_DISTORTION in finding_types
+        assert (
+            HallucinationType.ENTITY_SWAP in finding_types
+            or HallucinationType.NUMERICAL_DISTORTION in finding_types
+        )
 
         # Record evaluation multiple times to push rolling average above alert threshold
         for _ in range(5):
@@ -241,8 +246,14 @@ class TestFinancialStressTestingAndRiskIntegration:
             results[sc] = res
 
         # BLACK_SWAN and VOLATILITY_SPIKE should produce heavier drawdowns than BASELINE
-        assert results[StressScenarioType.BLACK_SWAN].worst_case_drawdown >= results[StressScenarioType.BASELINE].worst_case_drawdown
-        assert results[StressScenarioType.VOLATILITY_SPIKE].worst_case_drawdown >= results[StressScenarioType.BASELINE].worst_case_drawdown
+        assert (
+            results[StressScenarioType.BLACK_SWAN].worst_case_drawdown
+            >= results[StressScenarioType.BASELINE].worst_case_drawdown
+        )
+        assert (
+            results[StressScenarioType.VOLATILITY_SPIKE].worst_case_drawdown
+            >= results[StressScenarioType.BASELINE].worst_case_drawdown
+        )
 
     def test_risk_engine_cornish_fisher_skewness_impact(self):
         engine = FinancialRiskEngine()
@@ -257,8 +268,12 @@ class TestFinancialStressTestingAndRiskIntegration:
         crash_ret[40] = -0.12
         crash_ret[80] = -0.10
 
-        var_normal = engine.calculate_parametric_var(normal_ret, confidence_level=0.99, cornish_fisher=True)
-        var_crash = engine.calculate_parametric_var(crash_ret, confidence_level=0.99, cornish_fisher=True)
+        var_normal = engine.calculate_parametric_var(
+            normal_ret, confidence_level=0.99, cornish_fisher=True
+        )
+        var_crash = engine.calculate_parametric_var(
+            crash_ret, confidence_level=0.99, cornish_fisher=True
+        )
 
         # Crash distribution must result in a much higher Value at Risk
         assert var_crash > var_normal
@@ -286,7 +301,9 @@ class TestDriftDetectionAndAlertingWorkflow:
             )
 
         # Drift check with baseline alone -> no drift
-        drift_initial = collector.detect_drift(metric="faithfulness_score", baseline_size=15, test_size=5)
+        drift_initial = collector.detect_drift(
+            metric="faithfulness_score", baseline_size=15, test_size=5
+        )
         assert drift_initial["drift_detected"] is False
 
         # 2. Degraded period: 10 poor-quality evaluations with variance

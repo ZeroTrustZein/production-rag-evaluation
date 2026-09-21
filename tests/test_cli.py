@@ -131,9 +131,7 @@ class TestCLIEvaluateCommands:
         content = json.loads(out_file.read_text(encoding="utf-8"))
         assert content["faithfulness_score"] > 0.8
 
-    def test_evaluate_read_from_file_prefix(
-        self, cli_runner: CliRunner, tmp_path: Path
-    ) -> None:
+    def test_evaluate_read_from_file_prefix(self, cli_runner: CliRunner, tmp_path: Path) -> None:
         ctx_file = tmp_path / "context.txt"
         ctx_file.write_text("Alphabet Inc. revenue for 2024 was $350 billion.", encoding="utf-8")
 
@@ -193,18 +191,22 @@ class TestCLIBatchEvaluateCommands:
         self, cli_runner: CliRunner, sample_chunk_apple: DocumentChunk, tmp_path: Path
     ) -> None:
         lines = [
-            json.dumps({
-                "query_id": "q-101",
-                "query": "What were net sales?",
-                "answer": "Net sales were $391.0 billion.",
-                "context": sample_chunk_apple.text,
-            }),
-            json.dumps({
-                "query_id": "q-102",
-                "query": "What was total cost?",
-                "answer": "Total cost was $210 billion.",
-                "context": sample_chunk_apple.text,
-            }),
+            json.dumps(
+                {
+                    "query_id": "q-101",
+                    "query": "What were net sales?",
+                    "answer": "Net sales were $391.0 billion.",
+                    "context": sample_chunk_apple.text,
+                }
+            ),
+            json.dumps(
+                {
+                    "query_id": "q-102",
+                    "query": "What was total cost?",
+                    "answer": "Total cost was $210 billion.",
+                    "context": sample_chunk_apple.text,
+                }
+            ),
         ]
         input_path = tmp_path / "batch.jsonl"
         input_path.write_text("\n".join(lines), encoding="utf-8")

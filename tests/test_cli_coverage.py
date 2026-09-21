@@ -47,10 +47,14 @@ class TestCLIHelpersAndEdgeCases:
             _parse_float_array("0.01, not_a_number, 0.05")
 
     def test_parse_targets_invalid_values(self):
-        with pytest.raises(click.BadParameter, match="Invalid target numerical value in 'revenue=invalid'"):
+        with pytest.raises(
+            click.BadParameter, match="Invalid target numerical value in 'revenue=invalid'"
+        ):
             _parse_targets(("revenue=invalid",))
 
-        with pytest.raises(click.BadParameter, match="Invalid target numerical value in 'invalid_float'"):
+        with pytest.raises(
+            click.BadParameter, match="Invalid target numerical value in 'invalid_float'"
+        ):
             _parse_targets(("invalid_float",))
 
 
@@ -113,7 +117,9 @@ class TestCLIRichOutputsAndTables:
             overall_pass=False,
             findings=[mock_finding],
         )
-        with patch("production_rag_evaluation.cli.main.RAGEvaluator.evaluate", return_value=mock_metrics):
+        with patch(
+            "production_rag_evaluation.cli.main.RAGEvaluator.evaluate", return_value=mock_metrics
+        ):
             result = cli_runner.invoke(
                 cli,
                 [
@@ -184,32 +190,42 @@ class TestCLIRichOutputsAndTables:
         # Create history file with 30 items
         items = []
         for i in range(20):
-            items.append({
-                "faithfulness_score": 0.95 + (i % 3) * 0.01,
-                "answer_relevance_score": 0.9,
-                "context_recall_score": 0.9,
-                "context_precision_score": 0.9,
-                "citation_grounding_score": 0.9,
-                "hallucination_rate": 0.0,
-                "overall_pass": True,
-            })
+            items.append(
+                {
+                    "faithfulness_score": 0.95 + (i % 3) * 0.01,
+                    "answer_relevance_score": 0.9,
+                    "context_recall_score": 0.9,
+                    "context_precision_score": 0.9,
+                    "citation_grounding_score": 0.9,
+                    "hallucination_rate": 0.0,
+                    "overall_pass": True,
+                }
+            )
         for i in range(10):
-            items.append({
-                "faithfulness_score": 0.50 + (i % 3) * 0.01,
-                "answer_relevance_score": 0.5,
-                "context_recall_score": 0.5,
-                "context_precision_score": 0.5,
-                "citation_grounding_score": 0.5,
-                "hallucination_rate": 0.5,
-                "overall_pass": False,
-            })
+            items.append(
+                {
+                    "faithfulness_score": 0.50 + (i % 3) * 0.01,
+                    "answer_relevance_score": 0.5,
+                    "context_recall_score": 0.5,
+                    "context_precision_score": 0.5,
+                    "citation_grounding_score": 0.5,
+                    "hallucination_rate": 0.5,
+                    "overall_pass": False,
+                }
+            )
 
         history_file = tmp_path / "history_drift.json"
         history_file.write_text(json.dumps(items), encoding="utf-8")
 
         result = cli_runner.invoke(
             cli,
-            ["telemetry", "--history-file", str(history_file), "--drift-metric", "faithfulness_score"],
+            [
+                "telemetry",
+                "--history-file",
+                str(history_file),
+                "--drift-metric",
+                "faithfulness_score",
+            ],
         )
         assert result.exit_code == 0
         assert "Baseline Mean" in result.output

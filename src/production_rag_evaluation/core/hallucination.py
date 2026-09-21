@@ -68,11 +68,54 @@ class HallucinationDetector:
 
         # Ignored non-ticker capitalized tokens
         self._excluded_ticker_tokens: Set[str] = {
-            "USD", "EUR", "GBP", "CAD", "JPY", "SEC", "CEO", "CFO", "CTO", "COO",
-            "GAAP", "EPS", "FY", "Q1", "Q2", "Q3", "Q4", "AI", "IT", "US", "UK",
-            "EU", "CAGR", "EBITDA", "ROIC", "IPO", "SP", "MDA", "LLC", "INC",
-            "CORP", "LTD", "PLC", "ETF", "NAV", "AUM", "VAR", "CVAR", "ITEM",
-            "NOTE", "FORM", "TOTAL", "NET", "THE", "AND", "FOR", "NOT", "ALL",
+            "USD",
+            "EUR",
+            "GBP",
+            "CAD",
+            "JPY",
+            "SEC",
+            "CEO",
+            "CFO",
+            "CTO",
+            "COO",
+            "GAAP",
+            "EPS",
+            "FY",
+            "Q1",
+            "Q2",
+            "Q3",
+            "Q4",
+            "AI",
+            "IT",
+            "US",
+            "UK",
+            "EU",
+            "CAGR",
+            "EBITDA",
+            "ROIC",
+            "IPO",
+            "SP",
+            "MDA",
+            "LLC",
+            "INC",
+            "CORP",
+            "LTD",
+            "PLC",
+            "ETF",
+            "NAV",
+            "AUM",
+            "VAR",
+            "CVAR",
+            "ITEM",
+            "NOTE",
+            "FORM",
+            "TOTAL",
+            "NET",
+            "THE",
+            "AND",
+            "FOR",
+            "NOT",
+            "ALL",
         }
 
     def _extract_numerical_values(self, text: str) -> List[Tuple[float, str, str]]:
@@ -253,9 +296,7 @@ class HallucinationDetector:
         if not context_chunks:
             return findings
 
-        context_full = " ".join(
-            f"{c.text} {c.period or ''}" for c in context_chunks
-        )
+        context_full = " ".join(f"{c.text} {c.period or ''}" for c in context_chunks)
         context_years = set(self._YEAR_PATTERN.findall(context_full))
         if not context_years:
             return findings
@@ -310,7 +351,9 @@ class HallucinationDetector:
             if contra_findings or num_distortions:
                 status = ClaimStatus.REFUTED
                 conf = 0.90
-                reason = "Claim contradicts numerical facts or directional trends documented in context."
+                reason = (
+                    "Claim contradicts numerical facts or directional trends documented in context."
+                )
             elif not evidence_chunk_ids or not context_chunks:
                 status = ClaimStatus.UNGROUNDED
                 conf = 0.85
@@ -322,7 +365,9 @@ class HallucinationDetector:
             elif max_chunk_overlap >= 0.20:
                 status = ClaimStatus.AMBIGUOUS
                 conf = 0.50
-                reason = f"Claim partially evidenced ({max_chunk_overlap:.1%} overlap) but inconclusive."
+                reason = (
+                    f"Claim partially evidenced ({max_chunk_overlap:.1%} overlap) but inconclusive."
+                )
             else:
                 status = ClaimStatus.UNGROUNDED
                 conf = 0.75

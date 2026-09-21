@@ -22,21 +22,23 @@ from production_rag_evaluation.models.schemas import (
     Severity,
 )
 
-_RELEVANCE_STOPWORDS: frozenset[str] = frozenset({
-    "what",
-    "was",
-    "is",
-    "in",
-    "of",
-    "for",
-    "the",
-    "a",
-    "an",
-    "to",
-    "and",
-    "how",
-    "did",
-})
+_RELEVANCE_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "what",
+        "was",
+        "is",
+        "in",
+        "of",
+        "for",
+        "the",
+        "a",
+        "an",
+        "to",
+        "and",
+        "how",
+        "did",
+    }
+)
 _WORD_PATTERN = re.compile(r"\b\w+\b")
 
 
@@ -195,9 +197,7 @@ class EvaluationGraph:
 
     def _compute_relevance(self, state: EvaluationState) -> None:
         q_text_lower = state.query.query_text.lower()
-        q_tokens = [
-            w for w in _WORD_PATTERN.findall(q_text_lower) if w not in _RELEVANCE_STOPWORDS
-        ]
+        q_tokens = [w for w in _WORD_PATTERN.findall(q_text_lower) if w not in _RELEVANCE_STOPWORDS]
         a_tokens = _WORD_PATTERN.findall(state.response.generated_answer.lower())
 
         if not q_tokens:
