@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import time
 from collections import OrderedDict
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -71,10 +71,12 @@ class SemanticCache:
         similarity_threshold: float = 0.88,
         max_entries: int = 5000,
         ttl_seconds: float = 86400.0,
+        latency_saved_ms_per_hit: float = 25.0,
     ) -> None:
         self.similarity_threshold = similarity_threshold
         self.max_entries = max_entries
         self.ttl_seconds = ttl_seconds
+        self.latency_saved_ms_per_hit = latency_saved_ms_per_hit
         self._embedder = TextEmbedder()
         self._cache: OrderedDict[str, SemanticCacheEntry] = OrderedDict()
         self._hit_count: int = 0
@@ -148,6 +150,46 @@ class SemanticCache:
         self._cache[key] = entry
         return key
 
+    def get_batch(self, queries: List[str]) -> List[Optional[Tuple[Any, float]]]:
+        """Retrieve multiple queries from semantic cache in batch."""
+        return [self.get(q) for q in queries]
+
+    def put_batch(self, items: List[Tuple[str, Any]]) -> List[str]:
+        """Store multiple items in semantic cache."""
+        return [self.put(q, v) for q, v in items]
+
+    def find_similar(
+        self, query_text: str, top_k: int = 5, min_score: float = 0.3
+    ) -> List[Tuple[str, Any, float]]:
+        """Find top-k entries most similar to query_text with similarity >= min_score."""
+        self._purge_expired()
+        query_emb = self._embedder.embed(query_text)
+        candidates: List[Tuple[str, Any, float]] = []
+
+        for entry in self._cache.values():
+            if entry.is_expired:
+                continue
+            sim = self._cosine_similarity(query_emb, entry.embedding)
+            if sim >= min_score:
+                candidates.append((entry.query_text, entry.value, round(sim, 4)))
+
+        candidates.sort(key=lambda x: x[2], reverse=True)
+        return candidates[:top_k]
+
+    def export_entries(self) -> List[Dict[str, Any]]:
+        """Export snapshot of non-expired cached entries without heavy embeddings."""
+        self._purge_expired()
+        return [
+            {
+                "key": e.key,
+                "query_text": e.query_text,
+                "access_count": e.access_count,
+                "created_at": e.created_at,
+                "expires_at": e.expires_at,
+            }
+            for e in self._cache.values()
+        ]
+
     def _purge_expired(self) -> None:
         """Remove expired entries."""
         now = time.time()
@@ -178,6 +220,11 @@ class SemanticCache:
         total = self._hit_count + self._miss_count
         return round(self._hit_count / total, 4) if total > 0 else 0.0
 
+    @property
+    def estimated_latency_saved_ms(self) -> float:
+        """Estimated computational time saved by serving requests from cache."""
+        return round(self._hit_count * self.latency_saved_ms_per_hit, 2)
+
     def stats(self) -> Dict[str, Any]:
         return {
             "total_entries": self.size,
@@ -186,4 +233,5 @@ class SemanticCache:
             "miss_count": self._miss_count,
             "hit_rate": self.hit_rate,
             "similarity_threshold": self.similarity_threshold,
+            "estimated_latency_saved_ms": self.estimated_latency_saved_ms,
         }

@@ -3,29 +3,42 @@
 from __future__ import annotations
 
 import time
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import networkx as nx
 
 from production_rag_evaluation.core.hallucination import HallucinationDetector
 from production_rag_evaluation.models.schemas import (
     Citation,
+    ClaimStatus,
+    ClaimVerificationResult,
     EvaluationMetrics,
+    EvaluationMode,
     HallucinationFinding,
+    HallucinationType,
     RAGQuery,
     RAGResponse,
+    Severity,
 )
 
 
 class EvaluationState:
     """State object passing through evaluation graph nodes."""
 
-    def __init__(self, query: RAGQuery, response: RAGResponse) -> None:
+    def __init__(
+        self,
+        query: RAGQuery,
+        response: RAGResponse,
+        mode: EvaluationMode = EvaluationMode.THOROUGH,
+    ) -> None:
         self.query = query
         self.response = response
+        self.mode = mode
         self.claims: List[str] = []
         self.verified_citations: List[Citation] = []
         self.hallucinations: List[HallucinationFinding] = []
+        self.claim_verifications: List[ClaimVerificationResult] = []
+        self.target_checks: Dict[str, Any] = {}
         self.faithfulness_score: float = 1.0
         self.answer_relevance_score: float = 1.0
         self.context_recall_score: float = 1.0
@@ -51,6 +64,8 @@ class EvaluationGraph:
             "extract_claims",
             "verify_citations",
             "detect_hallucinations",
+            "verify_claims",
+            "verify_targets",
             "compute_relevance",
             "aggregate_metrics",
         ]
@@ -59,7 +74,9 @@ class EvaluationGraph:
 
         self._graph.add_edge("extract_claims", "verify_citations")
         self._graph.add_edge("verify_citations", "detect_hallucinations")
-        self._graph.add_edge("detect_hallucinations", "compute_relevance")
+        self._graph.add_edge("detect_hallucinations", "verify_claims")
+        self._graph.add_edge("verify_claims", "verify_targets")
+        self._graph.add_edge("verify_targets", "compute_relevance")
         self._graph.add_edge("compute_relevance", "aggregate_metrics")
 
     def _extract_claims(self, state: EvaluationState) -> None:
@@ -87,13 +104,71 @@ class EvaluationGraph:
         findings = self.detector.analyze(
             state.response.generated_answer, state.response.retrieved_chunks
         )
-        state.hallucinations = findings
+        state.hallucinations = list(findings)
 
         total_claims = max(len(state.claims), 1)
         hallucinated_claims = min(len(findings), total_claims)
         state.hallucination_rate = round(hallucinated_claims / total_claims, 4)
         state.faithfulness_score = max(0.0, round(1.0 - state.hallucination_rate, 4))
         state.execution_trace.append("detect_hallucinations")
+
+    def _verify_claims(self, state: EvaluationState) -> None:
+        state.claim_verifications = self.detector.verify_claims(
+            state.claims, state.response.retrieved_chunks
+        )
+        state.execution_trace.append("verify_claims")
+
+    def _verify_targets(self, state: EvaluationState) -> None:
+        target_results: Dict[str, Any] = {}
+        answer_nums = self.detector._extract_numerical_values(state.response.generated_answer)
+
+        # 1. Structured targets
+        for target in state.query.structured_targets:
+            matched = False
+            for val, _unit, _raw in answer_nums:
+                denom = max(abs(target.target_value), 1e-6)
+                if abs(val - target.target_value) / denom <= target.tolerance_pct:
+                    matched = True
+                    break
+            target_results[target.metric_name] = {"target": target.target_value, "matched": matched}
+            if not matched:
+                state.hallucinations.append(
+                    HallucinationFinding(
+                        finding_type=HallucinationType.NUMERICAL_DISTORTION,
+                        severity=Severity.HIGH,
+                        claim_text=f"Expected {target.metric_name}: {target.target_value}",
+                        reference_text=f"Tolerance: {target.tolerance_pct:.1%}",
+                        confidence=0.90,
+                        explanation=(
+                            f"Structured target '{target.metric_name}' value {target.target_value} "
+                            "missing or distorted in generated response."
+                        ),
+                    )
+                )
+
+        # 2. Raw expected numerical targets if structured_targets empty
+        if not state.query.structured_targets and state.query.expected_numerical_targets:
+            for exp_num in state.query.expected_numerical_targets:
+                matched = any(
+                    abs(val - exp_num) / max(abs(exp_num), 1e-6)
+                    <= self.detector.numerical_tolerance_pct
+                    for val, _unit, _raw in answer_nums
+                )
+                target_results[str(exp_num)] = {"target": exp_num, "matched": matched}
+                if not matched:
+                    state.hallucinations.append(
+                        HallucinationFinding(
+                            finding_type=HallucinationType.NUMERICAL_DISTORTION,
+                            severity=Severity.HIGH,
+                            claim_text=f"Expected value: {exp_num}",
+                            reference_text=f"Tolerance: {self.detector.numerical_tolerance_pct:.1%}",
+                            confidence=0.88,
+                            explanation=f"Numerical target {exp_num} missing or distorted in response.",
+                        )
+                    )
+
+        state.target_checks = target_results
+        state.execution_trace.append("verify_targets")
 
     def _compute_relevance(self, state: EvaluationState) -> None:
         import re
@@ -143,14 +218,37 @@ class EvaluationGraph:
         state.execution_trace.append("compute_relevance")
 
     def _aggregate_metrics(self, state: EvaluationState) -> None:
-        # Pass criteria: faithfulness >= 0.80, answer relevance >= 0.70, no CRITICAL hallucinations
-        critical_count = sum(1 for h in state.hallucinations if h.severity.value == "CRITICAL")
-        passes = (
-            state.faithfulness_score >= 0.75
-            and state.answer_relevance_score >= 0.50
-            and critical_count == 0
+        critical_count = sum(1 for h in state.hallucinations if h.severity == Severity.CRITICAL)
+        high_count = sum(1 for h in state.hallucinations if h.severity == Severity.HIGH)
+        refuted_count = sum(
+            1 for cv in state.claim_verifications if cv.status == ClaimStatus.REFUTED
         )
+
+        if state.mode == EvaluationMode.FAST:
+            passes = state.faithfulness_score >= 0.70 and critical_count == 0
+        elif state.mode == EvaluationMode.FINANCIAL_STRICT:
+            passes = (
+                state.faithfulness_score >= 0.85
+                and state.answer_relevance_score >= 0.60
+                and critical_count == 0
+                and high_count == 0
+            )
+        elif state.mode == EvaluationMode.AUDIT:
+            passes = (
+                state.faithfulness_score >= 0.75
+                and state.answer_relevance_score >= 0.50
+                and critical_count == 0
+                and refuted_count == 0
+            )
+        else:  # THOROUGH
+            passes = (
+                state.faithfulness_score >= 0.75
+                and state.answer_relevance_score >= 0.50
+                and critical_count == 0
+            )
+
         state.overall_pass = passes
+        state.execution_trace.append("aggregate_metrics")
 
         state.metrics = EvaluationMetrics(
             faithfulness_score=state.faithfulness_score,
@@ -160,20 +258,33 @@ class EvaluationGraph:
             citation_grounding_score=state.citation_grounding_score,
             hallucination_rate=state.hallucination_rate,
             findings=state.hallucinations,
+            claim_verifications=state.claim_verifications,
             overall_pass=state.overall_pass,
+            metadata={
+                "evaluation_mode": state.mode.value,
+                "execution_trace": list(state.execution_trace),
+                "total_claims": len(state.claims),
+                "target_checks": state.target_checks,
+            },
         )
-        state.execution_trace.append("aggregate_metrics")
 
-    def run(self, query: RAGQuery, response: RAGResponse) -> EvaluationMetrics:
+    def run(
+        self,
+        query: RAGQuery,
+        response: RAGResponse,
+        mode: EvaluationMode = EvaluationMode.THOROUGH,
+    ) -> EvaluationMetrics:
         """Execute evaluation DAG from start to finish."""
         start = time.perf_counter()
-        state = EvaluationState(query=query, response=response)
+        state = EvaluationState(query=query, response=response, mode=mode)
 
         # Run nodes in topological order
         node_funcs = {
             "extract_claims": self._extract_claims,
             "verify_citations": self._verify_citations,
             "detect_hallucinations": self._detect_hallucinations,
+            "verify_claims": self._verify_claims,
+            "verify_targets": self._verify_targets,
             "compute_relevance": self._compute_relevance,
             "aggregate_metrics": self._aggregate_metrics,
         }

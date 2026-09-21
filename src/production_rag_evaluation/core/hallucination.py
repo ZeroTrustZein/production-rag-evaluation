@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
-from typing import List, Tuple
+from typing import List, Set, Tuple
 
 from production_rag_evaluation.models.schemas import (
+    ClaimStatus,
+    ClaimVerificationResult,
     DocumentChunk,
     HallucinationFinding,
     HallucinationType,
@@ -47,6 +49,15 @@ class HallucinationDetector:
             "missed",
             "lower",
             "slumped",
+        }
+
+        # Ignored non-ticker capitalized tokens
+        self._excluded_ticker_tokens: Set[str] = {
+            "USD", "EUR", "GBP", "CAD", "JPY", "SEC", "CEO", "CFO", "CTO", "COO",
+            "GAAP", "EPS", "FY", "Q1", "Q2", "Q3", "Q4", "AI", "IT", "US", "UK",
+            "EU", "CAGR", "EBITDA", "ROIC", "IPO", "SP", "MDA", "LLC", "INC",
+            "CORP", "LTD", "PLC", "ETF", "NAV", "AUM", "VAR", "CVAR", "ITEM",
+            "NOTE", "FORM", "TOTAL", "NET", "THE", "AND", "FOR", "NOT", "ALL",
         }
 
     def _extract_numerical_values(self, text: str) -> List[Tuple[float, str, str]]:
@@ -196,6 +207,135 @@ class HallucinationDetector:
 
         return findings
 
+    def detect_entity_swaps(
+        self, generated_answer: str, context_chunks: List[DocumentChunk]
+    ) -> List[HallucinationFinding]:
+        """Detect entity swaps or foreign tickers present in answer but missing from context."""
+        findings: List[HallucinationFinding] = []
+        if not context_chunks:
+            return findings
+
+        context_tickers = {c.ticker.upper() for c in context_chunks if c.ticker}
+        all_context_text = " ".join(c.text for c in context_chunks)
+        context_words_upper = set(re.findall(r"\b[A-Z]{2,5}\b", all_context_text))
+
+        # Look for uppercase tickers in answer
+        gen_caps = set(re.findall(r"\b[A-Z]{2,5}\b", generated_answer))
+        candidate_tickers = gen_caps - self._excluded_ticker_tokens
+
+        for token in sorted(candidate_tickers):
+            if token not in context_tickers and token not in context_words_upper:
+                findings.append(
+                    HallucinationFinding(
+                        finding_type=HallucinationType.ENTITY_SWAP,
+                        severity=Severity.HIGH,
+                        claim_text=f"Referenced ticker/entity: {token}",
+                        reference_text=f"Context tickers: {sorted(list(context_tickers))}",
+                        confidence=0.85,
+                        explanation=(
+                            f"Answer mentions entity/ticker '{token}' which is not present in "
+                            "retrieved context chunks."
+                        ),
+                    )
+                )
+        return findings
+
+    def detect_temporal_mismatches(
+        self, generated_answer: str, context_chunks: List[DocumentChunk]
+    ) -> List[HallucinationFinding]:
+        """Detect temporal mismatches between reporting years/quarters in answer vs context."""
+        findings: List[HallucinationFinding] = []
+        if not context_chunks:
+            return findings
+
+        context_full = " ".join(
+            f"{c.text} {c.period or ''}" for c in context_chunks
+        )
+        context_years = set(re.findall(r"\b(19\d\d|20\d\d)\b", context_full))
+        if not context_years:
+            return findings
+
+        gen_years = set(re.findall(r"\b(19\d\d|20\d\d)\b", generated_answer))
+        mismatched_years = gen_years - context_years
+
+        for yr in sorted(mismatched_years):
+            findings.append(
+                HallucinationFinding(
+                    finding_type=HallucinationType.TEMPORAL_MISMATCH,
+                    severity=Severity.MEDIUM,
+                    claim_text=f"Reported temporal period/year: {yr}",
+                    reference_text=f"Available context years: {sorted(list(context_years))}",
+                    confidence=0.80,
+                    explanation=(
+                        f"Generated answer references period/year '{yr}', but retrieved context "
+                        f"is restricted to {sorted(list(context_years))}."
+                    ),
+                )
+            )
+        return findings
+
+    def verify_claims(
+        self, claims: List[str], context_chunks: List[DocumentChunk]
+    ) -> List[ClaimVerificationResult]:
+        """Verify individual claim statements against context chunks and assign verification status."""
+        results: List[ClaimVerificationResult] = []
+        if not claims:
+            return results
+
+        for idx, claim in enumerate(claims, 1):
+            claim_id = f"claim-{idx:03d}"
+            claim_lower = claim.lower()
+            claim_tokens = set(re.findall(r"\b\w{3,}\b", claim_lower))
+
+            # Identify supporting chunks
+            evidence_chunk_ids: List[str] = []
+            max_chunk_overlap = 0.0
+            for chunk in context_chunks:
+                c_tokens = set(re.findall(r"\b\w{3,}\b", chunk.text.lower()))
+                overlap = len(claim_tokens & c_tokens) / max(len(claim_tokens), 1)
+                if overlap > 0.20:
+                    evidence_chunk_ids.append(chunk.chunk_id)
+                if overlap > max_chunk_overlap:
+                    max_chunk_overlap = overlap
+
+            # Contradiction check on single claim
+            contra_findings = self.detect_directional_contradictions(claim, context_chunks)
+            num_distortions = self.detect_numerical_distortions(claim, context_chunks)
+
+            if contra_findings or num_distortions:
+                status = ClaimStatus.REFUTED
+                conf = 0.90
+                reason = "Claim contradicts numerical facts or directional trends documented in context."
+            elif not evidence_chunk_ids or not context_chunks:
+                status = ClaimStatus.UNGROUNDED
+                conf = 0.85
+                reason = "Claim lacks supporting evidence chunks in retrieved context."
+            elif max_chunk_overlap >= 0.35:
+                status = ClaimStatus.VERIFIED
+                conf = round(min(1.0, 0.70 + max_chunk_overlap * 0.3), 2)
+                reason = f"Claim grounded in evidence chunks with {max_chunk_overlap:.1%} keyword overlap."
+            elif max_chunk_overlap >= 0.20:
+                status = ClaimStatus.AMBIGUOUS
+                conf = 0.50
+                reason = f"Claim partially evidenced ({max_chunk_overlap:.1%} overlap) but inconclusive."
+            else:
+                status = ClaimStatus.UNGROUNDED
+                conf = 0.75
+                reason = "Claim token overlap insufficient for grounding verification."
+
+            results.append(
+                ClaimVerificationResult(
+                    claim_id=claim_id,
+                    claim_text=claim,
+                    status=status,
+                    confidence=conf,
+                    evidence_chunk_ids=evidence_chunk_ids,
+                    explanation=reason,
+                )
+            )
+
+        return results
+
     def analyze(
         self, generated_answer: str, context_chunks: List[DocumentChunk]
     ) -> List[HallucinationFinding]:
@@ -204,4 +344,6 @@ class HallucinationDetector:
         findings.extend(self.detect_numerical_distortions(generated_answer, context_chunks))
         findings.extend(self.detect_directional_contradictions(generated_answer, context_chunks))
         findings.extend(self.detect_ungrounded_claims(generated_answer, context_chunks))
+        findings.extend(self.detect_entity_swaps(generated_answer, context_chunks))
+        findings.extend(self.detect_temporal_mismatches(generated_answer, context_chunks))
         return findings
