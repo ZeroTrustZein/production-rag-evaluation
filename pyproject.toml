@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "production-rag-evaluation"
+version = "0.1.0"
+description = "Production RAG evaluation and hallucination detection pipeline for financial earnings calls and SEC 10-K filings using LangGraph and semantic caching"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Portfolio Automation" }]
+dependencies = [
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "click>=8.0.0",
+    "rich>=12.0.0",
+    "typing_extensions>=4.6.0",
+    "python-dotenv>=1.0.0",
+    "networkx>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.4.0",
+    "mypy>=1.8.0",
+    "build>=1.0.0",
+]
+
+[project.scripts]
+production-rag-eval = "production_rag_evaluation.cli.main:cli"
+rag-eval = "production_rag_evaluation.cli.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["production_rag_evaluation*"]
+
+[tool.setuptools.package-data]
+production_rag_evaluation = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.coverage.run]
+source = ["production_rag_evaluation"]
+omit = ["tests/*"]
+
+[tool.mypy]
+mypy_path = "src"
+plugins = ["pydantic.mypy"]
+check_untyped_defs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = true
