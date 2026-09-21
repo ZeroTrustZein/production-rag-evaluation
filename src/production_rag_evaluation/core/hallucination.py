@@ -293,7 +293,7 @@ class HallucinationDetector:
             for chunk in context_chunks:
                 c_tokens = set(re.findall(r"\b\w{3,}\b", chunk.text.lower()))
                 overlap = len(claim_tokens & c_tokens) / max(len(claim_tokens), 1)
-                if overlap > 0.20:
+                if overlap > 0.10:
                     evidence_chunk_ids.append(chunk.chunk_id)
                 if overlap > max_chunk_overlap:
                     max_chunk_overlap = overlap
