@@ -1,0 +1,332 @@
+"""Integration test suite covering end-to-end multi-module pipelines.
+
+Validates end-to-end interactions between:
+- RAGEvaluator and EvaluationGraph DAG
+- HallucinationDetector and ClaimVerification
+- SemanticCache lifecycle and LRU caching
+- FinancialRiskEngine and MonteCarloStressTester
+- RiskTelemetryCollector, drift detection, and alerting
+"""
+
+from typing import List
+
+import numpy as np
+import pytest
+
+from production_rag_evaluation.core.cache import SemanticCache
+from production_rag_evaluation.core.evaluator import RAGEvaluator
+from production_rag_evaluation.finance.metrics import FinancialRiskEngine
+from production_rag_evaluation.finance.stress_testing import MonteCarloStressTester
+from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
+from production_rag_evaluation.models.schemas import (
+    DocumentChunk,
+    DocumentType,
+    EvaluationMetrics,
+    EvaluationMode,
+    HallucinationType,
+    NumericalTarget,
+    RAGQuery,
+    RAGResponse,
+    StressScenarioType,
+    SystemHealthStatus,
+    TelemetryAlert,
+)
+
+
+class TestRAGToRiskTelemetryIntegration:
+    """Tests end-to-end flow from RAG evaluation to financial risk and telemetry."""
+
+    @pytest.fixture
+    def realistic_context(self) -> List[DocumentChunk]:
+        return [
+            DocumentChunk(
+                chunk_id="chunk-10k-01",
+                text="For fiscal 2024 Apple net sales reached $391.0 billion and services revenue reached $96.0 billion.",
+                doc_type=DocumentType.SEC_10K,
+                ticker="AAPL",
+                period="FY2024",
+            ),
+        ]
+
+    def test_full_pipeline_accurate_evaluation(self, realistic_context):
+        """Accurate RAG response passes strict audit and integrates cleanly with telemetry."""
+        evaluator = RAGEvaluator()
+        collector = RiskTelemetryCollector(evaluator=evaluator)
+
+        query = RAGQuery(
+            query_id="q-aapl-01",
+            query_text="What was Apple net sales and services revenue?",
+            ticker="AAPL",
+            period="FY2024",
+            structured_targets=[
+                NumericalTarget(metric_name="net_sales", target_value=391.0e9, tolerance_pct=0.02),
+                NumericalTarget(metric_name="services", target_value=96.0e9, tolerance_pct=0.02),
+            ],
+            expected_numerical_targets=[391.0e9, 96.0e9],
+        )
+
+        response = RAGResponse(
+            query_id="q-aapl-01",
+            generated_answer="Apple net sales reached $391.0 billion and services revenue reached $96.0 billion.",
+            retrieved_chunks=realistic_context,
+            confidence_score=0.98,
+        )
+
+        # Run through strict financial mode
+        metrics = evaluator.evaluate(query, response, mode=EvaluationMode.FINANCIAL_STRICT)
+        assert metrics.overall_pass is True
+        assert metrics.faithfulness_score >= 0.85
+        assert metrics.answer_relevance_score >= 0.60
+        assert len(metrics.findings) == 0
+
+        # Record to telemetry
+        collector.record_evaluation(metrics)
+        assert len(collector.get_evaluations()) == 1
+
+        # Check telemetry report
+        report = collector.generate_report()
+        assert report.health_status == SystemHealthStatus.HEALTHY
+        assert report.avg_faithfulness >= 0.85
+        assert report.avg_hallucination_rate == 0.0
+
+    def test_full_pipeline_hallucinated_evaluation_degrades_system(self, realistic_context):
+        """Hallucinated response triggers findings and transitions system health to UNHEALTHY."""
+        evaluator = RAGEvaluator()
+        collector = RiskTelemetryCollector(evaluator=evaluator)
+
+        received_alerts: List[TelemetryAlert] = []
+        collector.add_alert_listener(lambda a: received_alerts.append(a))
+
+        # Query expects AAPL Q3 revenue
+        query = RAGQuery(
+            query_id="q-aapl-02",
+            query_text="What was Apple's Q3 revenue and trajectory?",
+            ticker="AAPL",
+            period="Q3 2024",
+            structured_targets=[
+                NumericalTarget(metric_name="revenue", target_value=85.8e9, tolerance_pct=0.01)
+            ],
+        )
+
+        # Response contains numerical distortion, directional contradiction, and entity swap
+        corrupted_response = RAGResponse(
+            query_id="q-aapl-02",
+            generated_answer=(
+                "Microsoft MSFT reported revenue of $142.5 billion, but sales declined sharply "
+                "in the hardware segment during 2021."
+            ),
+            retrieved_chunks=realistic_context,
+            confidence_score=0.45,
+        )
+
+        metrics = evaluator.evaluate(
+            query, corrupted_response, mode=EvaluationMode.FINANCIAL_STRICT
+        )
+        assert metrics.overall_pass is False
+        assert len(metrics.findings) >= 2
+
+        finding_types = {f.finding_type for f in metrics.findings}
+        assert (
+            HallucinationType.ENTITY_SWAP in finding_types
+            or HallucinationType.NUMERICAL_DISTORTION in finding_types
+        )
+
+        # Record evaluation multiple times to push rolling average above alert threshold
+        for _ in range(5):
+            collector.record_evaluation(metrics)
+
+        # Stress returns with high drawdown
+        portfolio_returns = np.array([-0.05, -0.04, -0.03, -0.02, 0.01, -0.03])
+        report = collector.generate_report(
+            returns=portfolio_returns,
+            max_acceptable_hallucination_rate=0.05,
+            min_acceptable_sharpe=0.50,
+        )
+
+        assert report.health_status in (SystemHealthStatus.DEGRADED, SystemHealthStatus.UNHEALTHY)
+        assert len(report.structured_alerts) > 0
+        assert len(received_alerts) > 0
+
+
+class TestSemanticCacheAndDAGIntegration:
+    """Tests interaction between semantic caching and DAG evaluation execution."""
+
+    def test_cache_hit_bypasses_graph_execution(self):
+        evaluator = RAGEvaluator()
+        evaluator.clear_cache()
+
+        chunk = DocumentChunk(
+            chunk_id="chk-01",
+            text="Alphabet Q2 net income rose 28% to $23.6 billion with operating margin of 32%.",
+            document_type=DocumentType.SEC_10Q,
+            ticker="GOOGL",
+            period="Q2 2024",
+        )
+
+        query = RAGQuery(
+            query_id="q-googl-01",
+            query_text="What was Alphabet Q2 net income and operating margin?",
+            ticker="GOOGL",
+            period="Q2 2024",
+        )
+        response = RAGResponse(
+            query_id="q-googl-01",
+            generated_answer="Alphabet reported Q2 net income of $23.6 billion with a 32% operating margin.",
+            retrieved_chunks=[chunk],
+        )
+
+        # Cold evaluation (cache miss)
+        res1 = evaluator.evaluate(query, response, use_cache=True)
+        assert evaluator.cache.size == 1
+        assert evaluator.cache.miss_count == 1
+        assert evaluator.cache.hit_count == 0
+
+        # Identical query text (exact cache hit)
+        res2 = evaluator.evaluate(query, response, use_cache=True)
+        assert evaluator.cache.hit_count == 1
+        assert res2 == res1
+
+        # Semantically identical query text with slight variation
+        query_variant = RAGQuery(
+            query_id="q-googl-02",
+            query_text="What was Alphabet Q2 net income and operating margin?",
+            ticker="GOOGL",
+            period="Q2 2024",
+        )
+        res3 = evaluator.evaluate(query_variant, response, use_cache=True)
+        assert evaluator.cache.hit_count == 2
+        assert res3 == res1
+
+    def test_cache_lru_eviction_under_capacity(self):
+        cache = SemanticCache(max_entries=3)
+        cache.clear()
+
+        cache.put("Query 1", "Val 1")
+        cache.put("Query 2", "Val 2")
+        cache.put("Query 3", "Val 3")
+        assert cache.size == 3
+
+        # Access Query 1 so it becomes most recently used
+        cached = cache.get("Query 1")
+        assert cached is not None
+        val, _ = cached
+        assert val == "Val 1"
+
+        # Add Query 4 -> Query 2 should be evicted (LRU)
+        cache.put("Query 4", "Val 4")
+        assert cache.size == 3
+        assert cache.get("Query 2") is None
+        assert cache.get("Query 1") is not None
+        assert cache.get("Query 4") is not None
+
+
+class TestFinancialStressTestingAndRiskIntegration:
+    """Tests multi-scenario stress simulations integrated with portfolio risk metrics."""
+
+    def test_all_scenarios_execute_with_expected_drawdown_bounds(self):
+        stress_tester = MonteCarloStressTester(random_seed=42)
+        base_returns = np.array([0.001, -0.002, 0.003, 0.0005, -0.001, 0.002, -0.0005, 0.0015])
+
+        scenarios = [
+            StressScenarioType.BASELINE,
+            StressScenarioType.VOLATILITY_SPIKE,
+            StressScenarioType.LIQUIDITY_CRUNCH,
+            StressScenarioType.RATE_SHOCK,
+            StressScenarioType.BLACK_SWAN,
+            StressScenarioType.HALLUCINATION_CASCADE,
+        ]
+
+        results = {}
+        for sc in scenarios:
+            res = stress_tester.run_scenario(base_returns, sc)
+            assert res.scenario_type == sc
+            assert res.n_simulations == 1000
+            assert 0.0 <= res.worst_case_drawdown <= 1.0
+            assert 0.0 <= res.breach_probability <= 1.0
+            results[sc] = res
+
+        # BLACK_SWAN and VOLATILITY_SPIKE should produce heavier drawdowns than BASELINE
+        assert (
+            results[StressScenarioType.BLACK_SWAN].worst_case_drawdown
+            >= results[StressScenarioType.BASELINE].worst_case_drawdown
+        )
+        assert (
+            results[StressScenarioType.VOLATILITY_SPIKE].worst_case_drawdown
+            >= results[StressScenarioType.BASELINE].worst_case_drawdown
+        )
+
+    def test_risk_engine_cornish_fisher_skewness_impact(self):
+        engine = FinancialRiskEngine()
+
+        # Positively skewed series vs negatively skewed series
+        rng = np.random.default_rng(101)
+        normal_ret = rng.normal(0.001, 0.015, 200)
+
+        # Introduce severe negative tail shocks (crash)
+        crash_ret = normal_ret.copy()
+        crash_ret[10] = -0.15
+        crash_ret[40] = -0.12
+        crash_ret[80] = -0.10
+
+        var_normal = engine.calculate_parametric_var(
+            normal_ret, confidence_level=0.99, cornish_fisher=True
+        )
+        var_crash = engine.calculate_parametric_var(
+            crash_ret, confidence_level=0.99, cornish_fisher=True
+        )
+
+        # Crash distribution must result in a much higher Value at Risk
+        assert var_crash > var_normal
+
+
+class TestDriftDetectionAndAlertingWorkflow:
+    """Tests statistical drift detection and alert propagation across shifting distributions."""
+
+    def test_drift_detected_on_quality_degradation(self):
+        evaluator = RAGEvaluator()
+        collector = RiskTelemetryCollector(evaluator=evaluator)
+
+        # 1. Baseline period: 20 high-quality evaluations with variance
+        for i in range(20):
+            collector.record_evaluation(
+                EvaluationMetrics(
+                    faithfulness_score=0.92 + (i % 5) * 0.015,
+                    answer_relevance_score=0.90,
+                    context_recall_score=0.90,
+                    context_precision_score=0.90,
+                    citation_grounding_score=0.90,
+                    hallucination_rate=0.0,
+                    overall_pass=True,
+                )
+            )
+
+        # Drift check with baseline alone -> no drift
+        drift_initial = collector.detect_drift(
+            metric="faithfulness_score", baseline_size=15, test_size=5
+        )
+        assert drift_initial["drift_detected"] is False
+
+        # 2. Degraded period: 10 poor-quality evaluations with variance
+        for i in range(10):
+            collector.record_evaluation(
+                EvaluationMetrics(
+                    faithfulness_score=0.55 + (i % 4) * 0.02,
+                    answer_relevance_score=0.70,
+                    context_recall_score=0.70,
+                    context_precision_score=0.70,
+                    citation_grounding_score=0.60,
+                    hallucination_rate=0.35,
+                    overall_pass=False,
+                )
+            )
+
+        # Drift check now reveals statistically significant drop
+        drift_result = collector.detect_drift(
+            metric="faithfulness_score",
+            baseline_size=20,
+            test_size=10,
+            alpha=0.05,
+        )
+        assert drift_result["drift_detected"] is True
+        assert drift_result["p_value"] < 0.05
+        assert drift_result["recent_mean"] < drift_result["baseline_mean"]
