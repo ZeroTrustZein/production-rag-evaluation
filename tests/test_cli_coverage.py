@@ -248,3 +248,40 @@ class TestMainEntryPoint:
             with pytest.raises(SystemExit) as exc_info:
                 runpy.run_module("production_rag_evaluation", run_name="__main__")
             assert exc_info.value.code == 0
+
+    def test_feature_store_export_empty_entities_error(self, cli_runner: CliRunner, tmp_path: Path):
+        fs_path = tmp_path / "fs"
+        out_f = tmp_path / "out.jsonl"
+        res = cli_runner.invoke(
+            cli,
+            [
+                "feature-store",
+                "export",
+                "--path",
+                str(fs_path),
+                "--entities",
+                ", , ",
+                "--output",
+                str(out_f),
+            ],
+        )
+        assert res.exit_code != 0
+        assert "No valid entity IDs provided" in res.output
+
+    def test_feature_store_drift_feature_without_group_error(
+        self, cli_runner: CliRunner, tmp_path: Path
+    ):
+        fs_path = tmp_path / "fs"
+        res = cli_runner.invoke(
+            cli,
+            [
+                "feature-store",
+                "drift",
+                "--path",
+                str(fs_path),
+                "--feature",
+                "query_length",
+            ],
+        )
+        assert res.exit_code != 0
+        assert "requires specifying --group" in res.output

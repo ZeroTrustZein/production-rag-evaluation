@@ -17,6 +17,7 @@ from production_rag_evaluation.core.evaluator import RAGEvaluator
 from production_rag_evaluation.core.hallucination import HallucinationDetector
 from production_rag_evaluation.features.drift import FeatureDriftDetector
 from production_rag_evaluation.features.handlers import (
+    EvaluationFeatureHandler,
     FeatureCompactionHandler,
     FeatureExportHandler,
 )
@@ -128,6 +129,12 @@ def cli() -> None:
 @click.option(
     "--output", "-o", type=click.Path(writable=True), help="Path to write evaluation JSON report."
 )
+@click.option(
+    "--feature-store-path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Optional feature store path to stream evaluation features into.",
+)
 @click.option("--json-out", is_flag=True, help="Output raw JSON results.")
 def evaluate_cmd(
     query: str,
@@ -139,6 +146,7 @@ def evaluate_cmd(
     target: Tuple[str, ...],
     no_cache: bool,
     output: Optional[str],
+    feature_store_path: Optional[Path],
     json_out: bool,
 ) -> None:
     """Evaluate a single RAG query/response against financial context."""
@@ -175,6 +183,12 @@ def evaluate_cmd(
     )
 
     metrics = evaluator.evaluate(q, resp, mode=eval_mode)
+
+    if feature_store_path:
+        fs = ParquetFeatureStore(base_path=feature_store_path)
+        handler = EvaluationFeatureHandler(auto_flush=True)
+        handler.pipeline.store = fs
+        handler.handle_evaluation(query=q, response=resp, metrics=metrics, flush_immediately=True)
 
     if output:
         Path(output).write_text(metrics.model_dump_json(indent=2), encoding="utf-8")
@@ -303,6 +317,12 @@ def evaluate_cmd(
 )
 @click.option("--batch-id", default=None, help="Custom identifier for the batch run.")
 @click.option("--no-cache", is_flag=True, default=False, help="Disable semantic cache for batch.")
+@click.option(
+    "--feature-store-path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Optional feature store path to stream evaluation features into.",
+)
 @click.option("--json-out", is_flag=True, help="Output raw JSON summary.")
 def batch_evaluate_cmd(
     input_file: str,
@@ -310,6 +330,7 @@ def batch_evaluate_cmd(
     mode: str,
     batch_id: Optional[str],
     no_cache: bool,
+    feature_store_path: Optional[Path],
     json_out: bool,
 ) -> None:
     """Run batch evaluation across multiple queries and context passages from a file."""
@@ -380,6 +401,16 @@ def batch_evaluate_cmd(
     summary = evaluator.evaluate_batch_summary(
         pairs, batch_id=batch_id, use_cache=not no_cache, mode=eval_mode
     )
+
+    if feature_store_path:
+        fs = ParquetFeatureStore(base_path=feature_store_path)
+        handler = EvaluationFeatureHandler(auto_flush=True)
+        handler.pipeline.store = fs
+        handler.handle_batch_evaluations(
+            pairs=pairs,
+            metrics_list=summary.results,
+            flush_immediately=True,
+        )
 
     if output:
         Path(output).write_text(summary.model_dump_json(indent=2), encoding="utf-8")
@@ -1066,7 +1097,11 @@ def feature_store_export_cmd(
     entity_arg = entities.strip()
     candidate_file = Path(entity_arg)
     if candidate_file.is_file():
-        entity_ids = [line.strip() for line in candidate_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+        entity_ids = [
+            line.strip()
+            for line in candidate_file.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
     else:
         entity_ids = [e.strip() for e in entity_arg.split(",") if e.strip()]
 
@@ -1131,7 +1166,9 @@ def feature_store_drift_cmd(
 
     if feature:
         if not target_group:
-            raise click.BadParameter("Evaluating a specific feature requires specifying --group / -g.")
+            raise click.BadParameter(
+                "Evaluating a specific feature requires specifying --group / -g."
+            )
         reports = [
             detector.detect_feature_drift(
                 feature_name=feature,
@@ -1151,7 +1188,7 @@ def feature_store_drift_cmd(
         return
 
     table = Table(title=f"Feature Distribution Drift Analysis (PSI Threshold = {threshold})")
-    table.add_column("Feature", style="cyan")
+    table.add_column("Feature", style="cyan", no_wrap=True)
     table.add_column("Group", style="magenta")
     table.add_column("PSI Score", justify="right")
     table.add_column("Baseline Mean", justify="right")

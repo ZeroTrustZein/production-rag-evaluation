@@ -92,7 +92,9 @@ class EvaluationFeatureHandler:
         """Process an entire batch of evaluations and materialize features."""
         all_extracted: List[FeatureRecord] = []
         for (q, r), m in zip(pairs, metrics_list):
-            records = self.handle_evaluation(query=q, response=r, metrics=m, flush_immediately=False)
+            records = self.handle_evaluation(
+                query=q, response=r, metrics=m, flush_immediately=False
+            )
             all_extracted.extend(records)
 
         if flush_immediately or self.auto_flush:
@@ -167,7 +169,11 @@ class FeatureCompactionHandler:
             now_utc = datetime.now(timezone.utc)
             surviving: List[FeatureRecord] = []
             for r in records:
-                r_ts = r.timestamp if r.timestamp.tzinfo is not None else r.timestamp.replace(tzinfo=timezone.utc)
+                r_ts = (
+                    r.timestamp
+                    if r.timestamp.tzinfo is not None
+                    else r.timestamp.replace(tzinfo=timezone.utc)
+                )
                 age = (now_utc - r_ts).total_seconds()
                 if age <= ttl_seconds:
                     surviving.append(r)
@@ -231,7 +237,9 @@ class FeatureCompactionHandler:
     def prune_expired_records(self, group: FeatureGroup, older_than: datetime) -> int:
         """Purge records strictly older than the specified timestamp."""
         now_utc = datetime.now(timezone.utc)
-        target_utc = older_than if older_than.tzinfo is not None else older_than.replace(tzinfo=timezone.utc)
+        target_utc = (
+            older_than if older_than.tzinfo is not None else older_than.replace(tzinfo=timezone.utc)
+        )
         ttl = max(0.0, (now_utc - target_utc).total_seconds())
         res = self.compact_group(group=group, ttl_seconds=ttl)
         return res.expired_records_pruned
@@ -252,9 +260,7 @@ class FeatureExportHandler:
         groups: Optional[List[FeatureGroup]] = None,
     ) -> Union[List[Dict[str, Any]], Path]:
         """Construct point-in-time multi-group feature matrix and export to chosen format."""
-        matrix = self.store.get_historical_matrix(
-            entity_ids=entity_ids, groups=groups, as_of=as_of
-        )
+        matrix = self.store.get_historical_matrix(entity_ids=entity_ids, groups=groups, as_of=as_of)
 
         if output_path is None or format == ExportFormat.DICT:
             return matrix

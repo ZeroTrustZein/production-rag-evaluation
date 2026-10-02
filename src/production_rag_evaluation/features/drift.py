@@ -125,7 +125,11 @@ class FeatureDriftDetector:
                 drift_detected=False,
                 threshold=psi_threshold,
                 severity=AlertSeverity.INFO,
-                details={"reason": "insufficient_sample_size", "baseline_n": len(b_vals), "target_n": len(t_vals)},
+                details={
+                    "reason": "insufficient_sample_size",
+                    "baseline_n": len(b_vals),
+                    "target_n": len(t_vals),
+                },
             )
 
         b_arr = np.array(b_vals, dtype=float)

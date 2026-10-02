@@ -370,9 +370,7 @@ class FeatureRegistry:
 
         if schema is None:
             if strict:
-                errors.append(
-                    f"No registered schema found for group: {record.feature_group.value}"
-                )
+                errors.append(f"No registered schema found for group: {record.feature_group.value}")
             else:
                 warnings.append(
                     f"No schema registered for group: {record.feature_group.value}; skipped validation."
@@ -388,9 +386,7 @@ class FeatureRegistry:
                         f"Unrecognized feature '{fname}' in group {record.feature_group.value}"
                     )
                 else:
-                    warnings.append(
-                        f"Feature '{fname}' is not defined in schema {schema.name}"
-                    )
+                    warnings.append(f"Feature '{fname}' is not defined in schema {schema.name}")
                 continue
 
             # Null check
@@ -407,9 +403,7 @@ class FeatureRegistry:
                     )
             elif fdef.value_type == FeatureValueType.INT:
                 if not isinstance(fval, int) or isinstance(fval, bool):
-                    errors.append(
-                        f"Feature '{fname}' expected INT, received {type(fval).__name__}"
-                    )
+                    errors.append(f"Feature '{fname}' expected INT, received {type(fval).__name__}")
             elif fdef.value_type == FeatureValueType.FLOAT:
                 if not isinstance(fval, (int, float)) or isinstance(fval, bool):
                     errors.append(

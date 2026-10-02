@@ -420,3 +420,280 @@ class TestCLITelemetryAndCacheCommands:
         res_clear = cli_runner.invoke(cli, ["cache", "clear"])
         assert res_clear.exit_code == 0
         assert "Semantic cache successfully cleared" in res_clear.output
+
+
+class TestCLIFeatureStoreCommands:
+    """Validate feature store CLI operations: stats, list-schemas, compact, export, and drift."""
+
+    def test_feature_store_stats_empty_and_populated(
+        self, cli_runner: CliRunner, tmp_path: Path
+    ) -> None:
+        fs_path = tmp_path / "fs"
+        # Empty stats
+        res = cli_runner.invoke(
+            cli, ["feature-store", "stats", "--path", str(fs_path), "--json-out"]
+        )
+        assert res.exit_code == 0
+        data = json.loads(res.output)
+        assert data["total_records"] == 0
+        assert data["total_bytes"] == 0
+
+        # Seed record
+        from datetime import datetime, timezone
+
+        from production_rag_evaluation.features.models import FeatureGroup, FeatureRecord
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+
+        store = ParquetFeatureStore(base_path=fs_path)
+        store.write_records(
+            [
+                FeatureRecord(
+                    entity_id="q1",
+                    feature_group=FeatureGroup.QUERY,
+                    features={"query_length": 45, "word_count": 7},
+                    timestamp=datetime.now(timezone.utc),
+                )
+            ]
+        )
+
+        # Rich output test
+        res_rich = cli_runner.invoke(cli, ["features", "stats", "--path", str(fs_path)])
+        assert res_rich.exit_code == 0
+        assert "Columnar Feature Store Storage Summary" in res_rich.output
+        assert "Total Records: 1" in res_rich.output
+
+    def test_feature_store_list_schemas(self, cli_runner: CliRunner) -> None:
+        # All schemas JSON
+        res_json = cli_runner.invoke(cli, ["feature-store", "list-schemas", "--json-out"])
+        assert res_json.exit_code == 0
+        schemas = json.loads(res_json.output)
+        assert "QUERY" in schemas
+        assert "FINANCIAL" in schemas
+        assert "EVALUATION" in schemas
+
+        # Filtered group table output
+        res_table = cli_runner.invoke(cli, ["features", "list-schemas", "--group", "QUERY"])
+        assert res_table.exit_code == 0
+        assert "rag_query_features" in res_table.output
+        assert "query_length" in res_table.output
+
+    def test_feature_store_compact(self, cli_runner: CliRunner, tmp_path: Path) -> None:
+        fs_path = tmp_path / "fs"
+        from datetime import datetime, timezone
+
+        from production_rag_evaluation.features.models import FeatureGroup, FeatureRecord
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+
+        store = ParquetFeatureStore(base_path=fs_path)
+        store.write_records(
+            [
+                FeatureRecord(
+                    entity_id="resp-1",
+                    feature_group=FeatureGroup.RESPONSE,
+                    features={"answer_length": 120, "word_count": 22},
+                    timestamp=datetime.now(timezone.utc),
+                )
+            ]
+        )
+
+        # Compact specific group with JSON
+        res_json = cli_runner.invoke(
+            cli,
+            [
+                "feature-store",
+                "compact",
+                "--path",
+                str(fs_path),
+                "--group",
+                "RESPONSE",
+                "--json-out",
+            ],
+        )
+        assert res_json.exit_code == 0
+        comp_data = json.loads(res_json.output)
+        assert "RESPONSE" in comp_data
+        assert comp_data["RESPONSE"]["records_compacted"] == 1
+
+        # Compact all groups table output
+        res_table = cli_runner.invoke(
+            cli,
+            ["features", "compact", "--path", str(fs_path)],
+        )
+        assert res_table.exit_code == 0
+        assert "Feature Store Compaction Report" in res_table.output
+
+    def test_feature_store_export(self, cli_runner: CliRunner, tmp_path: Path) -> None:
+        fs_path = tmp_path / "fs"
+        from datetime import datetime, timezone
+
+        from production_rag_evaluation.features.models import FeatureGroup, FeatureRecord
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+
+        store = ParquetFeatureStore(base_path=fs_path)
+        store.write_records(
+            [
+                FeatureRecord(
+                    entity_id="entity-x",
+                    feature_group=FeatureGroup.QUERY,
+                    features={"query_length": 50},
+                    timestamp=datetime.now(timezone.utc),
+                ),
+                FeatureRecord(
+                    entity_id="entity-x",
+                    feature_group=FeatureGroup.RESPONSE,
+                    features={"answer_length": 200},
+                    timestamp=datetime.now(timezone.utc),
+                ),
+            ]
+        )
+
+        # Export JSONL
+        out_jsonl = tmp_path / "export.jsonl"
+        res_jsonl = cli_runner.invoke(
+            cli,
+            [
+                "feature-store",
+                "export",
+                "--path",
+                str(fs_path),
+                "--entities",
+                "entity-x",
+                "--output",
+                str(out_jsonl),
+                "--format",
+                "jsonl",
+            ],
+        )
+        assert res_jsonl.exit_code == 0
+        assert out_jsonl.exists()
+        line = json.loads(out_jsonl.read_text(encoding="utf-8").strip())
+        assert line["entity_id"] == "entity-x"
+        assert line["query__query_length"] == 50
+        assert line["response__answer_length"] == 200
+
+        # Export CSV with entities from file
+        ent_file = tmp_path / "entities.txt"
+        ent_file.write_text("entity-x\n", encoding="utf-8")
+        out_csv = tmp_path / "export.csv"
+        res_csv = cli_runner.invoke(
+            cli,
+            [
+                "features",
+                "export",
+                "--path",
+                str(fs_path),
+                "--entities",
+                str(ent_file),
+                "--output",
+                str(out_csv),
+                "--format",
+                "csv",
+            ],
+        )
+        assert res_csv.exit_code == 0
+        assert out_csv.exists()
+        assert "entity-x" in out_csv.read_text(encoding="utf-8")
+
+    def test_feature_store_drift(self, cli_runner: CliRunner, tmp_path: Path) -> None:
+        fs_path = tmp_path / "fs"
+        from datetime import datetime, timezone
+
+        from production_rag_evaluation.features.models import FeatureGroup, FeatureRecord
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+
+        store = ParquetFeatureStore(base_path=fs_path)
+        # Seed records for drift calculation
+        records = [
+            FeatureRecord(
+                entity_id=f"e-{i}",
+                feature_group=FeatureGroup.QUERY,
+                features={"query_length": 30 + i * 5},
+                timestamp=datetime.now(timezone.utc),
+            )
+            for i in range(10)
+        ]
+        store.write_records(records)
+
+        # Check all features drift in group
+        res_json = cli_runner.invoke(
+            cli,
+            [
+                "feature-store",
+                "drift",
+                "--path",
+                str(fs_path),
+                "--group",
+                "QUERY",
+                "--json-out",
+            ],
+        )
+        assert res_json.exit_code == 0
+        drift_reports = json.loads(res_json.output)
+        assert isinstance(drift_reports, list)
+
+        # Check table output for single feature
+        res_single = cli_runner.invoke(
+            cli,
+            [
+                "features",
+                "drift",
+                "--path",
+                str(fs_path),
+                "--group",
+                "QUERY",
+                "--feature",
+                "query_length",
+                "--threshold",
+                "0.20",
+            ],
+        )
+        assert res_single.exit_code == 0
+        assert "Feature Distribution Drift Analysis" in res_single.output
+        assert "query_length" in res_single.output
+
+    def test_evaluate_and_batch_evaluate_with_feature_store_path(
+        self, cli_runner: CliRunner, tmp_path: Path, sample_chunk_apple: DocumentChunk
+    ) -> None:
+        fs_path = tmp_path / "eval_fs"
+        # Test evaluate with --feature-store-path
+        res_eval = cli_runner.invoke(
+            cli,
+            [
+                "evaluate",
+                "-q",
+                "What was Apple's total net sales?",
+                "-a",
+                "Apple reported net sales of $391.0 billion.",
+                "-c",
+                sample_chunk_apple.text,
+                "--feature-store-path",
+                str(fs_path),
+            ],
+        )
+        assert res_eval.exit_code == 0
+        assert (fs_path / "query" / "features.parquet").exists()
+        assert (fs_path / "evaluation" / "features.parquet").exists()
+
+        # Test batch-evaluate with --feature-store-path
+        batch_input = tmp_path / "batch.json"
+        batch_data = [
+            {
+                "query_id": "b-1",
+                "query_text": "Apple revenue?",
+                "generated_answer": "Revenue was $391.0 billion.",
+                "context": sample_chunk_apple.text,
+            }
+        ]
+        batch_input.write_text(json.dumps(batch_data), encoding="utf-8")
+
+        res_batch = cli_runner.invoke(
+            cli,
+            [
+                "batch-evaluate",
+                "-i",
+                str(batch_input),
+                "--feature-store-path",
+                str(fs_path),
+            ],
+        )
+        assert res_batch.exit_code == 0

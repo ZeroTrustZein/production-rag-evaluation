@@ -26,9 +26,7 @@ class SchemaValidationResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     valid: bool = Field(description="Whether the record adheres strictly to the schema")
-    errors: List[str] = Field(
-        default_factory=list, description="Validation failure descriptions"
-    )
+    errors: List[str] = Field(default_factory=list, description="Validation failure descriptions")
     warnings: List[str] = Field(
         default_factory=list, description="Non-fatal warnings (e.g. unmapped extra fields)"
     )

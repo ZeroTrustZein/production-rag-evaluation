@@ -661,7 +661,9 @@ class TestFeatureStoreSubsystems:
 
         # Ingest financial risk metrics
         risk_engine = FinancialRiskEngine()
-        risk_m = risk_engine.compute_all_metrics(np.array([0.01, 0.02, -0.01, 0.015, 0.005, -0.002]))
+        risk_m = risk_engine.compute_all_metrics(
+            np.array([0.01, 0.02, -0.01, 0.015, 0.005, -0.002])
+        )
         risk_rec = handler.handle_risk_metrics(risk_m, entity_id="risk_101", flush_immediately=True)
         assert risk_rec is not None
         assert store.count_records() == 5
@@ -824,10 +826,7 @@ class TestFeatureStoreSubsystems:
         collector = RiskTelemetryCollector()
         received = []
         collector.add_alert_listener(lambda a: received.append(a))
-        alerts = drift_detector.generate_telemetry_alerts(
-            collector=collector, reports=[report]
-        )
+        alerts = drift_detector.generate_telemetry_alerts(collector=collector, reports=[report])
         assert len(alerts) == 1
         assert "Feature drift detected" in alerts[0].message
         assert len(received) == 1
-
