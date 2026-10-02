@@ -70,3 +70,6 @@ venv.bak/
 temp/
 tmp/
 *.log
+*.parquet
+data/
+
