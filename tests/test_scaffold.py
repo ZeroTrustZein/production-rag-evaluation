@@ -285,4 +285,3 @@ def test_feature_store_and_streaming_pipeline(tmp_path, sample_chunk_apple: Docu
     assert store.count_records() == 2
     summary = store.storage_summary()
     assert summary["total_records"] == 2
-

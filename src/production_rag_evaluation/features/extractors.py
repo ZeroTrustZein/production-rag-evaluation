@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Union
+from typing import Any, Dict
 
 import numpy as np
 
@@ -72,13 +72,22 @@ class BaseFeatureExtractor(ABC):
         return True
 
 
-
 class QueryFeatureExtractor(BaseFeatureExtractor):
     """Extracts lexical, financial, and structural features from queries."""
 
     FINANCIAL_TERMS = {
-        "revenue", "sales", "margin", "ebitda", "net income", "eps",
-        "guidance", "capex", "cash flow", "dividend", "debt", "growth"
+        "revenue",
+        "sales",
+        "margin",
+        "ebitda",
+        "net income",
+        "eps",
+        "guidance",
+        "capex",
+        "cash flow",
+        "dividend",
+        "debt",
+        "growth",
     }
 
     def __init__(self) -> None:
@@ -86,11 +95,31 @@ class QueryFeatureExtractor(BaseFeatureExtractor):
             name="rag_query_features",
             feature_group=FeatureGroup.QUERY,
             features=[
-                FeatureDefinition(name="query_char_len", feature_group=FeatureGroup.QUERY, value_type=FeatureValueType.INT),
-                FeatureDefinition(name="query_word_count", feature_group=FeatureGroup.QUERY, value_type=FeatureValueType.INT),
-                FeatureDefinition(name="has_ticker", feature_group=FeatureGroup.QUERY, value_type=FeatureValueType.BOOLEAN),
-                FeatureDefinition(name="financial_intent_density", feature_group=FeatureGroup.QUERY, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="has_numerical_target", feature_group=FeatureGroup.QUERY, value_type=FeatureValueType.BOOLEAN),
+                FeatureDefinition(
+                    name="query_char_len",
+                    feature_group=FeatureGroup.QUERY,
+                    value_type=FeatureValueType.INT,
+                ),
+                FeatureDefinition(
+                    name="query_word_count",
+                    feature_group=FeatureGroup.QUERY,
+                    value_type=FeatureValueType.INT,
+                ),
+                FeatureDefinition(
+                    name="has_ticker",
+                    feature_group=FeatureGroup.QUERY,
+                    value_type=FeatureValueType.BOOLEAN,
+                ),
+                FeatureDefinition(
+                    name="financial_intent_density",
+                    feature_group=FeatureGroup.QUERY,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="has_numerical_target",
+                    feature_group=FeatureGroup.QUERY,
+                    value_type=FeatureValueType.BOOLEAN,
+                ),
             ],
         )
         super().__init__(schema)
@@ -133,11 +162,31 @@ class ChunkFeatureExtractor(BaseFeatureExtractor):
             name="rag_chunk_features",
             feature_group=FeatureGroup.CHUNK,
             features=[
-                FeatureDefinition(name="chunk_char_len", feature_group=FeatureGroup.CHUNK, value_type=FeatureValueType.INT),
-                FeatureDefinition(name="chunk_word_count", feature_group=FeatureGroup.CHUNK, value_type=FeatureValueType.INT),
-                FeatureDefinition(name="numerical_token_density", feature_group=FeatureGroup.CHUNK, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="doc_type_code", feature_group=FeatureGroup.CHUNK, value_type=FeatureValueType.STRING),
-                FeatureDefinition(name="has_tables", feature_group=FeatureGroup.CHUNK, value_type=FeatureValueType.BOOLEAN),
+                FeatureDefinition(
+                    name="chunk_char_len",
+                    feature_group=FeatureGroup.CHUNK,
+                    value_type=FeatureValueType.INT,
+                ),
+                FeatureDefinition(
+                    name="chunk_word_count",
+                    feature_group=FeatureGroup.CHUNK,
+                    value_type=FeatureValueType.INT,
+                ),
+                FeatureDefinition(
+                    name="numerical_token_density",
+                    feature_group=FeatureGroup.CHUNK,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="doc_type_code",
+                    feature_group=FeatureGroup.CHUNK,
+                    value_type=FeatureValueType.STRING,
+                ),
+                FeatureDefinition(
+                    name="has_tables",
+                    feature_group=FeatureGroup.CHUNK,
+                    value_type=FeatureValueType.BOOLEAN,
+                ),
             ],
         )
         super().__init__(schema)
@@ -151,7 +200,7 @@ class ChunkFeatureExtractor(BaseFeatureExtractor):
         num_tokens = re.findall(r"\$?\d+(?:\.\d+)?%?", text)
         density = float(len(num_tokens) / max(1, word_count))
 
-        has_tables = ("|" in text or "\t" in text or "---" in text)
+        has_tables = "|" in text or "\t" in text or "---" in text
 
         features: Dict[str, Any] = {
             "chunk_char_len": char_len,
@@ -177,11 +226,31 @@ class ResponseFeatureExtractor(BaseFeatureExtractor):
             name="rag_response_features",
             feature_group=FeatureGroup.RESPONSE,
             features=[
-                FeatureDefinition(name="response_char_len", feature_group=FeatureGroup.RESPONSE, value_type=FeatureValueType.INT),
-                FeatureDefinition(name="response_word_count", feature_group=FeatureGroup.RESPONSE, value_type=FeatureValueType.INT),
-                FeatureDefinition(name="citation_count", feature_group=FeatureGroup.RESPONSE, value_type=FeatureValueType.INT),
-                FeatureDefinition(name="citation_ratio", feature_group=FeatureGroup.RESPONSE, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="retrieved_chunk_count", feature_group=FeatureGroup.RESPONSE, value_type=FeatureValueType.INT),
+                FeatureDefinition(
+                    name="response_char_len",
+                    feature_group=FeatureGroup.RESPONSE,
+                    value_type=FeatureValueType.INT,
+                ),
+                FeatureDefinition(
+                    name="response_word_count",
+                    feature_group=FeatureGroup.RESPONSE,
+                    value_type=FeatureValueType.INT,
+                ),
+                FeatureDefinition(
+                    name="citation_count",
+                    feature_group=FeatureGroup.RESPONSE,
+                    value_type=FeatureValueType.INT,
+                ),
+                FeatureDefinition(
+                    name="citation_ratio",
+                    feature_group=FeatureGroup.RESPONSE,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="retrieved_chunk_count",
+                    feature_group=FeatureGroup.RESPONSE,
+                    value_type=FeatureValueType.INT,
+                ),
             ],
         )
         super().__init__(schema)
@@ -220,14 +289,46 @@ class EvaluationFeatureExtractor(BaseFeatureExtractor):
             name="rag_evaluation_features",
             feature_group=FeatureGroup.EVALUATION,
             features=[
-                FeatureDefinition(name="faithfulness_score", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="answer_relevance_score", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="context_precision_score", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="context_recall_score", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="citation_grounding_score", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="hallucination_count", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.INT),
-                FeatureDefinition(name="overall_pass", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.BOOLEAN),
-                FeatureDefinition(name="evaluation_latency_ms", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
+                FeatureDefinition(
+                    name="faithfulness_score",
+                    feature_group=FeatureGroup.EVALUATION,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="answer_relevance_score",
+                    feature_group=FeatureGroup.EVALUATION,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="context_precision_score",
+                    feature_group=FeatureGroup.EVALUATION,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="context_recall_score",
+                    feature_group=FeatureGroup.EVALUATION,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="citation_grounding_score",
+                    feature_group=FeatureGroup.EVALUATION,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="hallucination_count",
+                    feature_group=FeatureGroup.EVALUATION,
+                    value_type=FeatureValueType.INT,
+                ),
+                FeatureDefinition(
+                    name="overall_pass",
+                    feature_group=FeatureGroup.EVALUATION,
+                    value_type=FeatureValueType.BOOLEAN,
+                ),
+                FeatureDefinition(
+                    name="evaluation_latency_ms",
+                    feature_group=FeatureGroup.EVALUATION,
+                    value_type=FeatureValueType.FLOAT,
+                ),
             ],
         )
         super().__init__(schema)
@@ -244,7 +345,9 @@ class EvaluationFeatureExtractor(BaseFeatureExtractor):
             "evaluation_latency_ms": metrics.evaluation_latency_ms,
         }
 
-        eval_id = str(metrics.metadata.get("evaluation_id", metrics.metadata.get("query_id", "eval_record")))
+        eval_id = str(
+            metrics.metadata.get("evaluation_id", metrics.metadata.get("query_id", "eval_record"))
+        )
         return FeatureRecord(
             entity_id=eval_id,
             feature_group=FeatureGroup.EVALUATION,
@@ -261,14 +364,46 @@ class FinancialFeatureExtractor(BaseFeatureExtractor):
             name="rag_financial_features",
             feature_group=FeatureGroup.FINANCIAL,
             features=[
-                FeatureDefinition(name="sharpe_ratio", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="sortino_ratio", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="max_drawdown", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="annualized_volatility", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="calmar_ratio", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="var_95", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="cvar_95", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="risk_profile", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.STRING),
+                FeatureDefinition(
+                    name="sharpe_ratio",
+                    feature_group=FeatureGroup.FINANCIAL,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="sortino_ratio",
+                    feature_group=FeatureGroup.FINANCIAL,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="max_drawdown",
+                    feature_group=FeatureGroup.FINANCIAL,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="annualized_volatility",
+                    feature_group=FeatureGroup.FINANCIAL,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="calmar_ratio",
+                    feature_group=FeatureGroup.FINANCIAL,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="var_95",
+                    feature_group=FeatureGroup.FINANCIAL,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="cvar_95",
+                    feature_group=FeatureGroup.FINANCIAL,
+                    value_type=FeatureValueType.FLOAT,
+                ),
+                FeatureDefinition(
+                    name="risk_profile",
+                    feature_group=FeatureGroup.FINANCIAL,
+                    value_type=FeatureValueType.STRING,
+                ),
             ],
         )
         super().__init__(schema)
@@ -304,4 +439,3 @@ class FinancialFeatureExtractor(BaseFeatureExtractor):
             features=features,
             metadata={"computed_at": datetime.now(timezone.utc).isoformat()},
         )
-

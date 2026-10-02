@@ -83,7 +83,6 @@ class ParquetFeatureStore:
         for rec in records:
             grouped.setdefault(rec.feature_group, []).append(rec)
 
-
         written_count = 0
         for group, recs in grouped.items():
             file_path = self._get_parquet_path(group)
@@ -105,7 +104,9 @@ class ParquetFeatureStore:
 
             if file_path.exists():
                 existing_table = pq.read_table(file_path)
-                combined_table = pa.concat_tables([existing_table, new_table], promote_options="default")
+                combined_table = pa.concat_tables(
+                    [existing_table, new_table], promote_options="default"
+                )
                 pq.write_table(combined_table, file_path, compression=compression)
             else:
                 pq.write_table(new_table, file_path, compression=compression)
@@ -221,13 +222,21 @@ class ParquetFeatureStore:
             # Check online cache first
             cached = self._online_cache.get((grp, entity_id))
             if cached is not None:
-                c_ts = cached.timestamp if cached.timestamp.tzinfo is not None else cached.timestamp.replace(tzinfo=timezone.utc)
+                c_ts = (
+                    cached.timestamp
+                    if cached.timestamp.tzinfo is not None
+                    else cached.timestamp.replace(tzinfo=timezone.utc)
+                )
                 if c_ts <= as_of_utc:
                     candidates.append(cached)
 
             recs = self.read_records(group=grp, entity_id=entity_id)
             for r in recs:
-                r_ts = r.timestamp if r.timestamp.tzinfo is not None else r.timestamp.replace(tzinfo=timezone.utc)
+                r_ts = (
+                    r.timestamp
+                    if r.timestamp.tzinfo is not None
+                    else r.timestamp.replace(tzinfo=timezone.utc)
+                )
                 if r_ts <= as_of_utc:
                     candidates.append(r)
 
@@ -325,4 +334,3 @@ class ParquetFeatureStore:
                 )
 
         return stats
-

@@ -50,7 +50,9 @@ class FeatureSchema(BaseModel):
 
     name: str = Field(description="Schema or table name")
     feature_group: FeatureGroup = Field(description="Target feature group")
-    features: List[FeatureDefinition] = Field(default_factory=list, description="List of feature specifications")
+    features: List[FeatureDefinition] = Field(
+        default_factory=list, description="List of feature specifications"
+    )
     version: str = Field(default="1.0.0", description="Schema version identifier")
 
     def get_feature(self, feature_name: str) -> Optional[FeatureDefinition]:
@@ -70,14 +72,20 @@ class FeatureRecord(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    entity_id: str = Field(description="Primary entity identifier (e.g., query_id, chunk_id, eval_id)")
+    entity_id: str = Field(
+        description="Primary entity identifier (e.g., query_id, chunk_id, eval_id)"
+    )
     feature_group: FeatureGroup = Field(description="Feature group namespace")
-    features: Dict[str, Any] = Field(default_factory=dict, description="Key-value mapping of extracted features")
+    features: Dict[str, Any] = Field(
+        default_factory=dict, description="Key-value mapping of extracted features"
+    )
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp when features were calculated or recorded",
     )
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Operational or source metadata")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Operational or source metadata"
+    )
 
 
 class StreamingBatchStats(BaseModel):
@@ -87,7 +95,9 @@ class StreamingBatchStats(BaseModel):
     records_ingested: int = Field(ge=0, description="Count of raw records processed")
     features_materialized: int = Field(ge=0, description="Count of feature records emitted")
     processing_time_ms: float = Field(ge=0.0, description="Elapsed execution time in milliseconds")
-    storage_flush_success: bool = Field(default=True, description="Whether Parquet persistence succeeded")
+    storage_flush_success: bool = Field(
+        default=True, description="Whether Parquet persistence succeeded"
+    )
     error_count: int = Field(default=0, ge=0, description="Number of extraction errors encountered")
 
 
@@ -104,7 +114,9 @@ class FeatureStatistics(BaseModel):
     std: Optional[float] = Field(default=None, description="Sample standard deviation")
     min_value: Optional[float] = Field(default=None, description="Minimum observed value")
     max_value: Optional[float] = Field(default=None, description="Maximum observed value")
-    quantiles: Dict[str, float] = Field(default_factory=dict, description="Distribution quantiles (p25, p50, p75)")
+    quantiles: Dict[str, float] = Field(
+        default_factory=dict, description="Distribution quantiles (p25, p50, p75)"
+    )
 
 
 class SlidingWindowStats(BaseModel):
@@ -114,10 +126,18 @@ class SlidingWindowStats(BaseModel):
 
     window_size: int = Field(ge=1, description="Number of observations in the sliding window")
     count: int = Field(ge=0, description="Active count of elements in current window")
-    avg_latency_ms: float = Field(ge=0.0, default=0.0, description="Mean latency across window events")
-    overall_pass_rate: float = Field(ge=0.0, le=1.0, default=1.0, description="Proportion of passing evaluations")
-    avg_faithfulness: float = Field(ge=0.0, le=1.0, default=1.0, description="Mean faithfulness score")
-    rolling_hallucination_rate: float = Field(ge=0.0, le=1.0, default=0.0, description="Rolling hallucination frequency")
+    avg_latency_ms: float = Field(
+        ge=0.0, default=0.0, description="Mean latency across window events"
+    )
+    overall_pass_rate: float = Field(
+        ge=0.0, le=1.0, default=1.0, description="Proportion of passing evaluations"
+    )
+    avg_faithfulness: float = Field(
+        ge=0.0, le=1.0, default=1.0, description="Mean faithfulness score"
+    )
+    rolling_hallucination_rate: float = Field(
+        ge=0.0, le=1.0, default=0.0, description="Rolling hallucination frequency"
+    )
 
 
 class OnlineFeatureVector(BaseModel):
@@ -132,4 +152,3 @@ class OnlineFeatureVector(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc),
         description="Freshness timestamp of the feature observation",
     )
-

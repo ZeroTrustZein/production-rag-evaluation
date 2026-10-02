@@ -147,7 +147,9 @@ class StreamingFeaturePipeline:
                 for e in eval_records
                 if "faithfulness_score" in e.features
             ]
-            avg_faith = float(sum(faithfulness_vals) / len(faithfulness_vals)) if faithfulness_vals else 1.0
+            avg_faith = (
+                float(sum(faithfulness_vals) / len(faithfulness_vals)) if faithfulness_vals else 1.0
+            )
             hallucinated_count = sum(
                 1 for e in eval_records if int(e.features.get("hallucination_count", 0)) > 0
             )
@@ -165,7 +167,6 @@ class StreamingFeaturePipeline:
             avg_faithfulness=round(avg_faith, 4),
             rolling_hallucination_rate=round(hallucination_rate, 4),
         )
-
 
     def flush(self) -> StreamingBatchStats:
         """Persist all unflushed feature records to Parquet columnar storage."""
@@ -218,4 +219,3 @@ class StreamingFeaturePipeline:
             "sliding_window": self.get_sliding_window_stats().model_dump(),
             "store_summary": self.store.storage_summary(),
         }
-

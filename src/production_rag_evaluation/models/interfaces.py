@@ -223,6 +223,15 @@ class FeatureStoreProtocol(Protocol):
         """Return diagnostic metrics on the stored features."""
         ...
 
+    def get_online_features(
+        self,
+        entity_ids: List[str],
+        feature_names: Optional[List[str]] = None,
+        group: Optional[Any] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Retrieve real-time features for entity IDs."""
+        ...
+
 
 @runtime_checkable
 class StreamingPipelineProtocol(Protocol):
@@ -243,4 +252,3 @@ class StreamingPipelineProtocol(Protocol):
     def stats(self) -> Dict[str, Any]:
         """Return operational pipeline statistics."""
         ...
-

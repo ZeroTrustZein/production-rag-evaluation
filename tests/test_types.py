@@ -8,16 +8,28 @@ from pydantic import ValidationError
 from production_rag_evaluation.core.cache import SemanticCache
 from production_rag_evaluation.core.evaluator import RAGEvaluator
 from production_rag_evaluation.core.hallucination import HallucinationDetector
+from production_rag_evaluation.features.models import (
+    FeatureDefinition,
+    FeatureGroup,
+    FeatureSchema,
+    FeatureValueType,
+    OnlineFeatureVector,
+    SlidingWindowStats,
+)
+from production_rag_evaluation.features.pipeline import StreamingFeaturePipeline
+from production_rag_evaluation.features.store import ParquetFeatureStore
 from production_rag_evaluation.finance.metrics import FinancialRiskEngine
 from production_rag_evaluation.finance.stress_testing import MonteCarloStressTester
 from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
 from production_rag_evaluation.models.interfaces import (
     EvaluatorProtocol,
+    FeatureStoreProtocol,
     FinancialRiskEngineProtocol,
     HallucinationDetectorProtocol,
     MonteCarloStressTesterProtocol,
     RiskTelemetryCollectorProtocol,
     SemanticCacheProtocol,
+    StreamingPipelineProtocol,
 )
 from production_rag_evaluation.models.schemas import (
     AlertSeverity,
@@ -374,3 +386,56 @@ class TestProtocolConformity:
     def test_risk_telemetry_collector_protocol_conformity(self) -> None:
         collector = RiskTelemetryCollector()
         assert isinstance(collector, RiskTelemetryCollectorProtocol)
+
+    def test_feature_store_protocol_conformity(self, tmp_path) -> None:
+        store = ParquetFeatureStore(base_path=tmp_path / "feat_store")
+        assert isinstance(store, FeatureStoreProtocol)
+
+    def test_streaming_pipeline_protocol_conformity(self, tmp_path) -> None:
+        store = ParquetFeatureStore(base_path=tmp_path / "feat_store")
+        pipeline = StreamingFeaturePipeline(store=store)
+        assert isinstance(pipeline, StreamingPipelineProtocol)
+
+
+class TestFeatureStoreModels:
+    """Validate Feature Definition, Schema, Statistics, and Streaming Batch models."""
+
+    def test_feature_definition_and_schema(self) -> None:
+        feat = FeatureDefinition(
+            name="query_length",
+            feature_group=FeatureGroup.QUERY,
+            value_type=FeatureValueType.INT,
+            description="Character length of input query",
+            nullable=False,
+        )
+        assert feat.name == "query_length"
+        assert feat.value_type == FeatureValueType.INT
+        assert feat.nullable is False
+
+        schema = FeatureSchema(
+            name="query_schema",
+            feature_group=FeatureGroup.QUERY,
+            features=[feat],
+        )
+        assert schema.get_feature("query_length") == feat
+        assert schema.get_feature("missing") is None
+
+    def test_sliding_window_and_online_vector(self) -> None:
+        stats = SlidingWindowStats(
+            window_size=10,
+            count=5,
+            avg_latency_ms=12.5,
+            overall_pass_rate=0.8,
+            avg_faithfulness=0.9,
+            rolling_hallucination_rate=0.2,
+        )
+        assert stats.window_size == 10
+        assert stats.count == 5
+
+        vec = OnlineFeatureVector(
+            entity_id="e1",
+            feature_group=FeatureGroup.QUERY,
+            features={"char_len": 42},
+        )
+        assert vec.entity_id == "e1"
+        assert vec.features["char_len"] == 42
