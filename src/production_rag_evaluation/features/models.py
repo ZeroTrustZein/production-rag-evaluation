@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 from production_rag_evaluation.models.schemas import AlertSeverity
 
 

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import math
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import numpy as np
 
@@ -181,7 +180,6 @@ class FeatureDriftDetector:
 
             import pyarrow.parquet as pq
 
-            meta = pq.read_metadata(fp)
             schema = pq.read_schema(fp)
             for name in schema.names:
                 if name.startswith("feat_"):
@@ -198,11 +196,13 @@ class FeatureDriftDetector:
 
     def generate_telemetry_alerts(
         self,
-        collector: RiskTelemetryCollector,
+        collector: Optional[RiskTelemetryCollector] = None,
         reports: Optional[List[FeatureDriftReport]] = None,
         psi_threshold: float = 0.25,
     ) -> List[TelemetryAlert]:
         """Generate and dispatch TelemetryAlert instances for all drifting features."""
+        import uuid
+
         active_reports = (
             reports
             if reports is not None
@@ -213,16 +213,22 @@ class FeatureDriftDetector:
         for rep in active_reports:
             if rep.drift_detected:
                 alert = TelemetryAlert(
+                    alert_id=f"alert-drift-{rep.feature_group.value.lower()}-{uuid.uuid4().hex[:8]}",
                     severity=rep.severity,
-                    component=f"FeatureStore.{rep.feature_group.value}.{rep.feature_name}",
+                    metric_name=f"{rep.feature_group.value}.{rep.feature_name}.psi",
+                    threshold=rep.threshold,
+                    observed_value=rep.psi_score,
                     message=(
                         f"Feature drift detected: PSI {rep.psi_score} >= {rep.threshold} "
                         f"(baseline mean: {rep.baseline_mean}, target mean: {rep.target_mean})"
                     ),
-                    metric_value=rep.psi_score,
-                    threshold=rep.threshold,
                 )
-                collector.record_alert(alert)
+                if collector is not None:
+                    for listener in collector._alert_listeners:
+                        try:
+                            listener(alert)
+                        except Exception:
+                            pass
                 alerts.append(alert)
 
         return alerts

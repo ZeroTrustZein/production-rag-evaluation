@@ -15,6 +15,14 @@ from rich.table import Table
 from production_rag_evaluation.core.cache import SemanticCache
 from production_rag_evaluation.core.evaluator import RAGEvaluator
 from production_rag_evaluation.core.hallucination import HallucinationDetector
+from production_rag_evaluation.features.drift import FeatureDriftDetector
+from production_rag_evaluation.features.handlers import (
+    FeatureCompactionHandler,
+    FeatureExportHandler,
+)
+from production_rag_evaluation.features.models import ExportFormat, FeatureGroup
+from production_rag_evaluation.features.registry import FeatureRegistry
+from production_rag_evaluation.features.store import ParquetFeatureStore
 from production_rag_evaluation.finance.metrics import FinancialRiskEngine
 from production_rag_evaluation.finance.stress_testing import MonteCarloStressTester
 from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
@@ -835,3 +843,334 @@ def cache_clear_cmd() -> None:
     """Flush all entries from the semantic cache."""
     _GLOBAL_CACHE.clear()
     console.print("[bold green]Semantic cache successfully cleared.[/bold green]")
+
+
+# -------------------------------------------------------------------------
+# 8. FEATURE STORE COMMAND GROUP
+# -------------------------------------------------------------------------
+@cli.group(name="feature-store")
+def feature_store_group() -> None:
+    """Inspect and manage columnar Parquet feature store and drift detection."""
+    pass
+
+
+# Register alias 'features' for feature-store command group
+cli.add_command(feature_store_group, name="features")
+
+
+@feature_store_group.command(name="stats")
+@click.option(
+    "--path",
+    "-p",
+    type=click.Path(path_type=Path),
+    default=Path("./data/feature_store"),
+    help="Path to feature store root directory.",
+)
+@click.option("--json-out", is_flag=True, help="Output raw JSON summary.")
+def feature_store_stats_cmd(path: Path, json_out: bool) -> None:
+    """Display feature store storage summary, record counts, and partition sizes."""
+    store = ParquetFeatureStore(base_path=path)
+    summary = store.storage_summary()
+
+    if json_out:
+        click.echo(json.dumps(summary, indent=2))
+        return
+
+    table = Table(title="Columnar Feature Store Storage Summary")
+    table.add_column("Feature Group", style="cyan")
+    table.add_column("Records", style="bold green", justify="right")
+    table.add_column("Columns", justify="right")
+    table.add_column("Row Groups", justify="right")
+    table.add_column("Size (Bytes)", justify="right")
+
+    for group_name, info in summary.get("groups", {}).items():
+        table.add_row(
+            group_name,
+            str(info.get("num_rows", 0)),
+            str(info.get("num_columns", 0)),
+            str(info.get("num_row_groups", 0)),
+            f"{info.get('size_bytes', 0):,}",
+        )
+
+    console.print(table)
+    console.print(
+        f"[bold]Total Records:[/bold] {summary.get('total_records', 0):,} | "
+        f"[bold]Total Storage:[/bold] {summary.get('total_bytes', 0):,} bytes | "
+        f"[bold]Location:[/bold] {path}"
+    )
+
+
+@feature_store_group.command(name="list-schemas")
+@click.option(
+    "--group",
+    "-g",
+    type=click.Choice([g.value for g in FeatureGroup], case_sensitive=False),
+    default=None,
+    help="Filter by specific feature group.",
+)
+@click.option("--json-out", is_flag=True, help="Output raw JSON schemas.")
+def feature_store_list_schemas_cmd(group: Optional[str], json_out: bool) -> None:
+    """List registered feature definitions, value types, and descriptions."""
+    registry = FeatureRegistry(load_defaults=True)
+    all_schemas = registry.list_schemas()
+
+    selected_group = FeatureGroup(group.upper()) if group else None
+    filtered = (
+        {selected_group: all_schemas[selected_group]}
+        if selected_group and selected_group in all_schemas
+        else all_schemas
+    )
+
+    if json_out:
+        payload = {k.value: v.model_dump(mode="json") for k, v in filtered.items()}
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    for grp, schema in filtered.items():
+        table = Table(title=f"Schema: {schema.name} ({grp.value}) - v{schema.version}")
+        table.add_column("Feature Name", style="cyan")
+        table.add_column("Type", style="bold yellow")
+        table.add_column("Nullable", justify="center")
+        table.add_column("Description", style="italic")
+
+        for feat in schema.features:
+            table.add_row(
+                feat.name,
+                feat.value_type.value,
+                "[yellow]Yes[/yellow]" if feat.nullable else "[green]No[/green]",
+                feat.description or "-",
+            )
+        console.print(table)
+
+
+@feature_store_group.command(name="compact")
+@click.option(
+    "--path",
+    "-p",
+    type=click.Path(path_type=Path),
+    default=Path("./data/feature_store"),
+    help="Path to feature store root directory.",
+)
+@click.option(
+    "--group",
+    "-g",
+    type=click.Choice([g.value for g in FeatureGroup], case_sensitive=False),
+    default=None,
+    help="Specific feature group to compact (default: all).",
+)
+@click.option("--ttl", type=float, default=None, help="Prune records older than TTL (seconds).")
+@click.option(
+    "--compression",
+    type=click.Choice(["snappy", "gzip", "brotli", "lz4", "zstd", "none"], case_sensitive=False),
+    default="snappy",
+    help="Parquet compression codec.",
+)
+@click.option("--json-out", is_flag=True, help="Output compaction results as JSON.")
+def feature_store_compact_cmd(
+    path: Path,
+    group: Optional[str],
+    ttl: Optional[float],
+    compression: str,
+    json_out: bool,
+) -> None:
+    """Compact Parquet partitions, purge duplicates, and prune TTL-expired records."""
+    store = ParquetFeatureStore(base_path=path)
+    compactor = FeatureCompactionHandler(store=store)
+
+    if group:
+        target_group = FeatureGroup(group.upper())
+        res = compactor.compact_group(
+            group=target_group,
+            ttl_seconds=ttl,
+            compression=compression.lower(),
+        )
+        results = {target_group: res}
+    else:
+        results = compactor.compact_all(ttl_seconds=ttl, compression=compression.lower())
+
+    if json_out:
+        out_dict = {k.value: v.model_dump(mode="json") for k, v in results.items()}
+        click.echo(json.dumps(out_dict, indent=2))
+        return
+
+    table = Table(title="Feature Store Compaction Report")
+    table.add_column("Group", style="cyan")
+    table.add_column("Records Retained", justify="right", style="bold green")
+    table.add_column("Pruned (TTL)", justify="right", style="bold red")
+    table.add_column("Bytes Before", justify="right")
+    table.add_column("Bytes After", justify="right")
+    table.add_column("Ratio", justify="right")
+    table.add_column("Duration", justify="right")
+
+    for grp, res in results.items():
+        table.add_row(
+            grp.value,
+            str(res.records_compacted),
+            str(res.expired_records_pruned),
+            f"{res.bytes_before:,}",
+            f"{res.bytes_after:,}",
+            f"{res.compression_ratio:.2f}",
+            f"{res.duration_ms:.1f} ms",
+        )
+
+    console.print(table)
+
+
+@feature_store_group.command(name="export")
+@click.option(
+    "--path",
+    "-p",
+    type=click.Path(path_type=Path),
+    default=Path("./data/feature_store"),
+    help="Path to feature store root directory.",
+)
+@click.option(
+    "--entities",
+    "-e",
+    required=True,
+    help="Comma-separated entity IDs or path to file containing entity IDs (one per line).",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Destination file path for exported matrix.",
+)
+@click.option(
+    "--format",
+    "-f",
+    type=click.Choice(["jsonl", "csv", "parquet"], case_sensitive=False),
+    default="jsonl",
+    help="Export matrix format (default: jsonl).",
+)
+@click.option(
+    "--group",
+    "-g",
+    type=click.Choice([g.value for g in FeatureGroup], case_sensitive=False),
+    multiple=True,
+    help="Feature groups to include (default: all).",
+)
+def feature_store_export_cmd(
+    path: Path,
+    entities: str,
+    output: Path,
+    format: str,
+    group: Tuple[str, ...],
+) -> None:
+    """Export aligned multi-group point-in-time feature matrix for entity IDs."""
+    store = ParquetFeatureStore(base_path=path)
+    exporter = FeatureExportHandler(store=store)
+
+    # Parse entities
+    entity_arg = entities.strip()
+    candidate_file = Path(entity_arg)
+    if candidate_file.is_file():
+        entity_ids = [line.strip() for line in candidate_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    else:
+        entity_ids = [e.strip() for e in entity_arg.split(",") if e.strip()]
+
+    if not entity_ids:
+        raise click.BadParameter("No valid entity IDs provided.")
+
+    target_groups = [FeatureGroup(g.upper()) for g in group] if group else None
+    export_format = ExportFormat(format.upper())
+
+    out_res = exporter.export_dataset(
+        entity_ids=entity_ids,
+        output_path=output,
+        format=export_format,
+        groups=target_groups,
+    )
+
+    console.print(
+        f"[bold green]Successfully exported {len(entity_ids)} entities to {out_res}[/bold green]"
+    )
+
+
+@feature_store_group.command(name="drift")
+@click.option(
+    "--path",
+    "-p",
+    type=click.Path(path_type=Path),
+    default=Path("./data/feature_store"),
+    help="Path to feature store root directory.",
+)
+@click.option(
+    "--feature",
+    "-f",
+    default=None,
+    help="Specific feature name to evaluate (default: all numeric).",
+)
+@click.option(
+    "--group",
+    "-g",
+    type=click.Choice([g.value for g in FeatureGroup], case_sensitive=False),
+    default=None,
+    help="Feature group to analyze.",
+)
+@click.option(
+    "--threshold",
+    type=float,
+    default=0.25,
+    help="Population Stability Index (PSI) drift alert threshold (default: 0.25).",
+)
+@click.option("--json-out", is_flag=True, help="Output drift reports as JSON.")
+def feature_store_drift_cmd(
+    path: Path,
+    feature: Optional[str],
+    group: Optional[str],
+    threshold: float,
+    json_out: bool,
+) -> None:
+    """Analyze feature distribution stability and detect statistical drift using PSI."""
+    store = ParquetFeatureStore(base_path=path)
+    detector = FeatureDriftDetector(store=store)
+
+    target_group = FeatureGroup(group.upper()) if group else None
+
+    if feature:
+        if not target_group:
+            raise click.BadParameter("Evaluating a specific feature requires specifying --group / -g.")
+        reports = [
+            detector.detect_feature_drift(
+                feature_name=feature,
+                group=target_group,
+                psi_threshold=threshold,
+            )
+        ]
+    else:
+        reports = detector.check_all_features_drift(
+            group=target_group,
+            psi_threshold=threshold,
+        )
+
+    if json_out:
+        out_list = [r.model_dump(mode="json") for r in reports]
+        click.echo(json.dumps(out_list, indent=2))
+        return
+
+    table = Table(title=f"Feature Distribution Drift Analysis (PSI Threshold = {threshold})")
+    table.add_column("Feature", style="cyan")
+    table.add_column("Group", style="magenta")
+    table.add_column("PSI Score", justify="right")
+    table.add_column("Baseline Mean", justify="right")
+    table.add_column("Target Mean", justify="right")
+    table.add_column("Drift Detected", justify="center")
+    table.add_column("Severity", justify="center")
+
+    for rep in reports:
+        drift_str = "[bold red]YES[/bold red]" if rep.drift_detected else "[green]NO[/green]"
+        b_mean_str = f"{rep.baseline_mean:.4f}" if rep.baseline_mean is not None else "-"
+        t_mean_str = f"{rep.target_mean:.4f}" if rep.target_mean is not None else "-"
+        table.add_row(
+            rep.feature_name,
+            rep.feature_group.value,
+            f"{rep.psi_score:.4f}",
+            b_mean_str,
+            t_mean_str,
+            drift_str,
+            rep.severity.value,
+        )
+
+    console.print(table)

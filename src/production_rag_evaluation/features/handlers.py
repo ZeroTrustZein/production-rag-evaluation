@@ -160,7 +160,6 @@ class FeatureCompactionHandler:
 
         bytes_before = file_path.stat().st_size
         records = self.store.read_records(group=group)
-        initial_count = len(records)
 
         # Filter out expired records if TTL is set
         expired_count = 0

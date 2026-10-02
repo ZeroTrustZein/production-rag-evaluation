@@ -252,3 +252,81 @@ class StreamingPipelineProtocol(Protocol):
     def stats(self) -> Dict[str, Any]:
         """Return operational pipeline statistics."""
         ...
+
+
+@runtime_checkable
+class FeatureRegistryProtocol(Protocol):
+    """Contract for feature schema and catalog registries."""
+
+    def register_schema(self, schema: Any) -> None:
+        """Register or update a schema specification."""
+        ...
+
+    def get_schema(self, group: Any) -> Optional[Any]:
+        """Retrieve schema for a feature group."""
+        ...
+
+    def validate_record(self, record: Any, strict: bool = False) -> Any:
+        """Validate a feature record against registered schema."""
+        ...
+
+
+@runtime_checkable
+class EvaluationFeatureHandlerProtocol(Protocol):
+    """Contract for evaluation subsystem integration handlers."""
+
+    def handle_evaluation(
+        self,
+        query: Any,
+        response: Any,
+        metrics: Any,
+        flush_immediately: bool = False,
+    ) -> List[Any]:
+        """Ingest evaluation pass artifacts into the feature store."""
+        ...
+
+    def handle_batch_evaluations(
+        self,
+        pairs: List[Tuple[Any, Any]],
+        metrics_list: List[Any],
+        flush_immediately: bool = True,
+    ) -> List[Any]:
+        """Ingest batch evaluation results into the feature store."""
+        ...
+
+
+@runtime_checkable
+class FeatureCompactionProtocol(Protocol):
+    """Contract for Parquet storage compaction and retention handlers."""
+
+    def compact_group(
+        self,
+        group: Any,
+        ttl_seconds: Optional[float] = None,
+        compression: str = "snappy",
+    ) -> Any:
+        """Compact a single feature group partition."""
+        ...
+
+    def compact_all(
+        self,
+        ttl_seconds: Optional[float] = None,
+        compression: str = "snappy",
+    ) -> Dict[Any, Any]:
+        """Compact all feature group partitions."""
+        ...
+
+
+@runtime_checkable
+class FeatureDriftDetectorProtocol(Protocol):
+    """Contract for statistical feature drift detection."""
+
+    def detect_feature_drift(
+        self,
+        feature_name: str,
+        group: Any,
+        current_records: Optional[List[Any]] = None,
+        psi_threshold: float = 0.25,
+    ) -> Any:
+        """Detect distribution shift for a specific feature."""
+        ...

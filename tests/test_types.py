@@ -396,6 +396,35 @@ class TestProtocolConformity:
         pipeline = StreamingFeaturePipeline(store=store)
         assert isinstance(pipeline, StreamingPipelineProtocol)
 
+    def test_new_subsystem_protocols_conformity(self, tmp_path) -> None:
+        from production_rag_evaluation.features.drift import FeatureDriftDetector
+        from production_rag_evaluation.features.handlers import (
+            EvaluationFeatureHandler,
+            FeatureCompactionHandler,
+        )
+        from production_rag_evaluation.features.registry import get_default_registry
+        from production_rag_evaluation.models.interfaces import (
+            EvaluationFeatureHandlerProtocol,
+            FeatureCompactionProtocol,
+            FeatureDriftDetectorProtocol,
+            FeatureRegistryProtocol,
+        )
+
+        store = ParquetFeatureStore(base_path=tmp_path / "feat_store")
+        pipeline = StreamingFeaturePipeline(store=store)
+
+        registry = get_default_registry()
+        assert isinstance(registry, FeatureRegistryProtocol)
+
+        handler = EvaluationFeatureHandler(pipeline=pipeline)
+        assert isinstance(handler, EvaluationFeatureHandlerProtocol)
+
+        compactor = FeatureCompactionHandler(store=store)
+        assert isinstance(compactor, FeatureCompactionProtocol)
+
+        drift = FeatureDriftDetector(store=store)
+        assert isinstance(drift, FeatureDriftDetectorProtocol)
+
 
 class TestFeatureStoreModels:
     """Validate Feature Definition, Schema, Statistics, and Streaming Batch models."""

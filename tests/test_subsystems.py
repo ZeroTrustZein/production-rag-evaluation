@@ -498,3 +498,336 @@ class TestRiskTelemetryCollectorSubsystem:
         assert summary["avg_faithfulness"] == 0.90
         assert "health_status" in summary
         assert "rolling_metrics" in summary
+
+
+class TestFeatureStoreSubsystems:
+    """Rigorous evaluation of FeatureRegistry, EvaluationFeatureHandler, Compaction, and Drift Detection."""
+
+    @pytest.fixture
+    def populated_feature_store(self, tmp_path):
+        from production_rag_evaluation.features.extractors import QueryFeatureExtractor
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+        from production_rag_evaluation.models.schemas import RAGQuery
+
+        store = ParquetFeatureStore(base_path=tmp_path / "fs_subsystem")
+        extractor = QueryFeatureExtractor()
+
+        for i in range(15):
+            query = RAGQuery(
+                query_id=f"q_{i}",
+                query_text=f"What was Apple's net margin in fiscal year 2024? Question {i}",
+                ticker="AAPL",
+            )
+            rec = extractor.extract(query)
+            store.write_records([rec])
+
+        return store
+
+    def test_feature_registry_schema_registration_and_validation(self) -> None:
+        from production_rag_evaluation.features.models import (
+            FeatureDefinition,
+            FeatureGroup,
+            FeatureRecord,
+            FeatureSchema,
+            FeatureValueType,
+        )
+        from production_rag_evaluation.features.registry import (
+            FeatureRegistry,
+            get_default_registry,
+        )
+        from production_rag_evaluation.models.interfaces import FeatureRegistryProtocol
+
+        registry = get_default_registry()
+        assert isinstance(registry, FeatureRegistryProtocol)
+
+        # Check default schemas loaded
+        schemas = registry.list_schemas()
+        assert FeatureGroup.QUERY in schemas
+        assert FeatureGroup.EVALUATION in schemas
+        assert FeatureGroup.FINANCIAL in schemas
+
+        # Query schema feature check
+        fdef = registry.get_feature_definition(FeatureGroup.QUERY, "query_length")
+        assert fdef is not None
+        assert fdef.value_type == FeatureValueType.INT
+
+        # Valid record validation
+        valid_rec = FeatureRecord(
+            entity_id="test_q1",
+            feature_group=FeatureGroup.QUERY,
+            features={"query_length": 55, "has_question_mark": True},
+        )
+        val_res = registry.validate_record(valid_rec, strict=False)
+        assert val_res.valid is True
+        assert len(val_res.errors) == 0
+
+        # Type mismatch validation
+        invalid_type_rec = FeatureRecord(
+            entity_id="test_q2",
+            feature_group=FeatureGroup.QUERY,
+            features={"query_length": "not_an_int"},
+        )
+        val_res_inv = registry.validate_record(invalid_type_rec, strict=True)
+        assert val_res_inv.valid is False
+        assert any("expected INT" in err for err in val_res_inv.errors)
+
+        # Custom schema registration
+        custom_schema = FeatureSchema(
+            name="custom_user_features",
+            feature_group=FeatureGroup.QUERY,
+            version="2.0.0",
+            features=[
+                FeatureDefinition(
+                    name="custom_metric",
+                    feature_group=FeatureGroup.QUERY,
+                    value_type=FeatureValueType.FLOAT,
+                    nullable=False,
+                )
+            ],
+        )
+        custom_reg = FeatureRegistry(load_defaults=False)
+        custom_reg.register_schema(custom_schema)
+        assert custom_reg.get_schema(FeatureGroup.QUERY) is not None
+
+        # Missing required field in strict mode
+        rec_missing = FeatureRecord(
+            entity_id="test_q3",
+            feature_group=FeatureGroup.QUERY,
+            features={},
+        )
+        strict_res = custom_reg.validate_record(rec_missing, strict=True)
+        assert strict_res.valid is False
+        assert any("Required non-nullable feature" in err for err in strict_res.errors)
+
+    def test_evaluation_feature_handler_subsystem(self, tmp_path) -> None:
+        from production_rag_evaluation.features.handlers import EvaluationFeatureHandler
+        from production_rag_evaluation.features.pipeline import StreamingFeaturePipeline
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+        from production_rag_evaluation.finance.metrics import FinancialRiskEngine
+        from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
+        from production_rag_evaluation.models.interfaces import EvaluationFeatureHandlerProtocol
+        from production_rag_evaluation.models.schemas import (
+            DocumentChunk,
+            DocumentType,
+            EvaluationMetrics,
+            RAGQuery,
+            RAGResponse,
+        )
+
+        store = ParquetFeatureStore(base_path=tmp_path / "handler_fs")
+        pipeline = StreamingFeaturePipeline(store=store, buffer_size=10, auto_flush=False)
+        collector = RiskTelemetryCollector()
+        handler = EvaluationFeatureHandler(
+            pipeline=pipeline, auto_flush=False, telemetry_collector=collector
+        )
+
+        assert isinstance(handler, EvaluationFeatureHandlerProtocol)
+
+        query = RAGQuery(
+            query_id="q_101",
+            query_text="What was Microsoft cloud revenue growth?",
+            ticker="MSFT",
+        )
+        chunk = DocumentChunk(
+            chunk_id="c_101",
+            text="Microsoft Cloud revenue was $38.9 billion, up 21% year-over-year.",
+            doc_type=DocumentType.SEC_10Q,
+            ticker="MSFT",
+        )
+        response = RAGResponse(
+            query_id="q_101",
+            generated_answer="Microsoft Cloud revenue grew 21% to $38.9 billion.",
+            retrieved_chunks=[chunk],
+            latency_ms=120.0,
+        )
+        metrics = EvaluationMetrics(
+            faithfulness_score=1.0,
+            answer_relevance_score=0.98,
+            context_recall_score=0.95,
+            context_precision_score=0.96,
+            citation_grounding_score=0.92,
+            hallucination_rate=0.0,
+            overall_pass=True,
+            evaluation_latency_ms=45.0,
+        )
+
+        # Ingest single evaluation
+        recs = handler.handle_evaluation(
+            query=query, response=response, metrics=metrics, flush_immediately=True
+        )
+        assert len(recs) == 4  # Query, Chunk, Response, Evaluation
+        assert store.count_records() == 4
+        assert len(collector.get_evaluations()) == 1
+
+        # Ingest financial risk metrics
+        risk_engine = FinancialRiskEngine()
+        risk_m = risk_engine.compute_all_metrics(np.array([0.01, 0.02, -0.01, 0.015, 0.005, -0.002]))
+        risk_rec = handler.handle_risk_metrics(risk_m, entity_id="risk_101", flush_immediately=True)
+        assert risk_rec is not None
+        assert store.count_records() == 5
+
+        # Telemetry snapshot
+        snap = handler.get_telemetry_snapshot()
+        assert "collector_summary" in snap
+        assert snap["collector_summary"]["total_evaluations"] == 1
+
+    def test_feature_compaction_and_ttl_pruning(self, tmp_path) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        from production_rag_evaluation.features.handlers import FeatureCompactionHandler
+        from production_rag_evaluation.features.models import FeatureGroup, FeatureRecord
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+        from production_rag_evaluation.models.interfaces import FeatureCompactionProtocol
+
+        store = ParquetFeatureStore(base_path=tmp_path / "compact_fs")
+        handler = FeatureCompactionHandler(store=store)
+        assert isinstance(handler, FeatureCompactionProtocol)
+
+        now = datetime.now(timezone.utc)
+        # Write records with varying timestamps: 3 active, 2 expired (older than 2 days)
+        recs = [
+            FeatureRecord(
+                entity_id=f"active_{i}",
+                feature_group=FeatureGroup.QUERY,
+                features={"query_length": 30 + i},
+                timestamp=now - timedelta(hours=i),
+            )
+            for i in range(3)
+        ]
+        recs.extend(
+            [
+                FeatureRecord(
+                    entity_id=f"expired_{j}",
+                    feature_group=FeatureGroup.QUERY,
+                    features={"query_length": 50 + j},
+                    timestamp=now - timedelta(days=5 + j),
+                )
+                for j in range(2)
+            ]
+        )
+        store.write_records(recs)
+        assert store.count_records(FeatureGroup.QUERY) == 5
+
+        # Run compaction with 2-day TTL (172800 seconds)
+        comp_res = handler.compact_group(
+            group=FeatureGroup.QUERY, ttl_seconds=172800.0, compression="snappy"
+        )
+        assert comp_res.records_compacted == 3
+        assert comp_res.expired_records_pruned == 2
+        assert store.count_records(FeatureGroup.QUERY) == 3
+
+        # Prune via older_than datetime method
+        pruned = handler.prune_expired_records(
+            group=FeatureGroup.QUERY, older_than=now + timedelta(days=1)
+        )
+        # All 3 remaining are older than tomorrow
+        assert pruned == 3
+        assert store.count_records(FeatureGroup.QUERY) == 0
+
+    def test_dataset_export_handler_formats(self, tmp_path) -> None:
+        import json
+
+        from production_rag_evaluation.features.handlers import FeatureExportHandler
+        from production_rag_evaluation.features.models import (
+            ExportFormat,
+            FeatureGroup,
+            FeatureRecord,
+        )
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+
+        store = ParquetFeatureStore(base_path=tmp_path / "export_fs")
+        recs = [
+            FeatureRecord(
+                entity_id=f"entity_{i}",
+                feature_group=FeatureGroup.QUERY,
+                features={"query_length": 25 + i, "has_question_mark": True},
+            )
+            for i in range(5)
+        ]
+        store.write_records(recs)
+
+        exporter = FeatureExportHandler(store=store)
+        entity_ids = [f"entity_{i}" for i in range(5)]
+
+        # 1. Export as Dict list
+        data_dict = exporter.export_dataset(entity_ids=entity_ids, format=ExportFormat.DICT)
+        assert isinstance(data_dict, list)
+        assert len(data_dict) == 5
+        assert data_dict[0]["entity_id"] == "entity_0"
+
+        # 2. Export as JSONL
+        jsonl_path = tmp_path / "export.jsonl"
+        exporter.export_dataset(
+            entity_ids=entity_ids, output_path=jsonl_path, format=ExportFormat.JSONL
+        )
+        assert jsonl_path.exists()
+        lines = jsonl_path.read_text(encoding="utf-8").strip().splitlines()
+        assert len(lines) == 5
+        assert json.loads(lines[0])["entity_id"] == "entity_0"
+
+        # 3. Export as CSV
+        csv_path = tmp_path / "export.csv"
+        exporter.export_dataset(
+            entity_ids=entity_ids, output_path=csv_path, format=ExportFormat.CSV
+        )
+        assert csv_path.exists()
+        csv_lines = csv_path.read_text(encoding="utf-8").strip().splitlines()
+        assert len(csv_lines) == 6  # header + 5 rows
+
+        # 4. Export as Parquet
+        parquet_path = tmp_path / "export.parquet"
+        exporter.export_dataset(
+            entity_ids=entity_ids, output_path=parquet_path, format=ExportFormat.PARQUET
+        )
+        assert parquet_path.exists()
+
+    def test_feature_drift_detector_psi_and_alerts(self, populated_feature_store) -> None:
+        from production_rag_evaluation.features.drift import FeatureDriftDetector
+        from production_rag_evaluation.features.models import FeatureGroup, FeatureRecord
+        from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
+        from production_rag_evaluation.models.interfaces import FeatureDriftDetectorProtocol
+
+        drift_detector = FeatureDriftDetector(store=populated_feature_store)
+        assert isinstance(drift_detector, FeatureDriftDetectorProtocol)
+
+        # Baseline PSI calculation: identical distributions -> PSI = 0.0
+        baseline_arr = np.array([20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0])
+        target_arr_ident = np.array([20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0])
+        psi_zero = drift_detector.calculate_psi(baseline_arr, target_arr_ident)
+        assert psi_zero == 0.0
+
+        # Divergent distribution -> High PSI
+        shifted_arr = np.array([120.0, 130.0, 140.0, 150.0, 160.0, 170.0, 180.0])
+        psi_high = drift_detector.calculate_psi(baseline_arr, shifted_arr)
+        assert psi_high > 0.30
+
+        # Current records with severe shift in query_char_len
+        shifted_recs = [
+            FeatureRecord(
+                entity_id=f"shift_{i}",
+                feature_group=FeatureGroup.QUERY,
+                features={"query_char_len": 500 + i * 20},
+            )
+            for i in range(10)
+        ]
+
+        report = drift_detector.detect_feature_drift(
+            feature_name="query_char_len",
+            group=FeatureGroup.QUERY,
+            current_records=shifted_recs,
+            psi_threshold=0.20,
+        )
+        assert report.drift_detected is True
+        assert report.psi_score > 0.20
+
+        # Alert generation into RiskTelemetryCollector
+        collector = RiskTelemetryCollector()
+        received = []
+        collector.add_alert_listener(lambda a: received.append(a))
+        alerts = drift_detector.generate_telemetry_alerts(
+            collector=collector, reports=[report]
+        )
+        assert len(alerts) == 1
+        assert "Feature drift detected" in alerts[0].message
+        assert len(received) == 1
+

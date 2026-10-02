@@ -1,7 +1,11 @@
 """Domain models, schemas, and protocol interfaces."""
 
 from production_rag_evaluation.models.interfaces import (
+    EvaluationFeatureHandlerProtocol,
     EvaluatorProtocol,
+    FeatureCompactionProtocol,
+    FeatureDriftDetectorProtocol,
+    FeatureRegistryProtocol,
     FeatureStoreProtocol,
     FinancialRiskEngineProtocol,
     HallucinationDetectorProtocol,
@@ -65,7 +69,11 @@ __all__ = [
     "TelemetryAlert",
     "TelemetryReport",
     # Protocols
+    "EvaluationFeatureHandlerProtocol",
     "EvaluatorProtocol",
+    "FeatureCompactionProtocol",
+    "FeatureDriftDetectorProtocol",
+    "FeatureRegistryProtocol",
     "FeatureStoreProtocol",
     "FinancialRiskEngineProtocol",
     "HallucinationDetectorProtocol",

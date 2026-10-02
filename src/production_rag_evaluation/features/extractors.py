@@ -421,6 +421,19 @@ class FinancialFeatureExtractor(BaseFeatureExtractor):
         else:
             raise ValueError(f"Unsupported item type for FinancialFeatureExtractor: {type(item)}")
 
+        profile = getattr(metrics, "risk_profile", None)
+        if profile is None:
+            if metrics.max_drawdown > 0.20 or metrics.annualized_volatility > 0.30:
+                profile_str = "AGGRESSIVE"
+            elif metrics.max_drawdown > 0.10 or metrics.annualized_volatility > 0.15:
+                profile_str = "BALANCED"
+            else:
+                profile_str = "CONSERVATIVE"
+        elif hasattr(profile, "value"):
+            profile_str = profile.value
+        else:
+            profile_str = str(profile)
+
         features: Dict[str, Any] = {
             "sharpe_ratio": float(metrics.sharpe_ratio),
             "sortino_ratio": float(metrics.sortino_ratio),
@@ -429,10 +442,10 @@ class FinancialFeatureExtractor(BaseFeatureExtractor):
             "calmar_ratio": float(metrics.calmar_ratio),
             "var_95": float(metrics.var_95),
             "cvar_95": float(metrics.cvar_95),
-            "risk_profile": metrics.risk_profile.value,
+            "risk_profile": profile_str,
         }
 
-        entity_id = f"fin_{metrics.risk_profile.value.lower()}"
+        entity_id = f"fin_{profile_str.lower()}"
         return FeatureRecord(
             entity_id=entity_id,
             feature_group=FeatureGroup.FINANCIAL,
