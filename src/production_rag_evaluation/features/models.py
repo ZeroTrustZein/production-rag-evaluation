@@ -9,6 +9,74 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
+from production_rag_evaluation.models.schemas import AlertSeverity
+
+
+class ExportFormat(str, Enum):
+    """Supported output formats for dataset exports."""
+
+    JSONL = "JSONL"
+    PARQUET = "PARQUET"
+    CSV = "CSV"
+    DICT = "DICT"
+
+
+class SchemaValidationResult(BaseModel):
+    """Result of validating a feature record against a schema."""
+
+    model_config = ConfigDict(frozen=True)
+
+    valid: bool = Field(description="Whether the record adheres strictly to the schema")
+    errors: List[str] = Field(
+        default_factory=list, description="Validation failure descriptions"
+    )
+    warnings: List[str] = Field(
+        default_factory=list, description="Non-fatal warnings (e.g. unmapped extra fields)"
+    )
+
+
+class CompactionResult(BaseModel):
+    """Metrics from compacting and purging a Parquet group partition."""
+
+    model_config = ConfigDict(frozen=True)
+
+    group: FeatureGroup = Field(description="Partition feature group")
+    records_compacted: int = Field(ge=0, description="Number of active records consolidated")
+    bytes_before: int = Field(ge=0, description="Storage size in bytes before compaction")
+    bytes_after: int = Field(ge=0, description="Storage size in bytes after compaction")
+    compression_ratio: float = Field(
+        ge=0.0, default=1.0, description="Ratio of bytes_after to bytes_before"
+    )
+    expired_records_pruned: int = Field(
+        ge=0, default=0, description="Count of TTL-expired records dropped"
+    )
+    duration_ms: float = Field(ge=0.0, default=0.0, description="Time taken in milliseconds")
+
+
+class FeatureDriftReport(BaseModel):
+    """Report detailing detected distribution drift for a single feature."""
+
+    model_config = ConfigDict(frozen=True)
+
+    feature_name: str = Field(description="Name of evaluated feature")
+    feature_group: FeatureGroup = Field(description="Feature group namespace")
+    psi_score: float = Field(ge=0.0, description="Population Stability Index (PSI)")
+    baseline_mean: Optional[float] = Field(
+        default=None, description="Mean of historical baseline distribution"
+    )
+    target_mean: Optional[float] = Field(
+        default=None, description="Mean of current/window distribution"
+    )
+    drift_detected: bool = Field(default=False, description="Whether PSI exceeded threshold")
+    threshold: float = Field(default=0.25, ge=0.0, description="PSI alert threshold applied")
+    severity: AlertSeverity = Field(
+        default=AlertSeverity.INFO, description="Alert severity classification"
+    )
+    details: Dict[str, Any] = Field(
+        default_factory=dict, description="Bucket-level drift diagnostics"
+    )
+
+
 class FeatureValueType(str, Enum):
     """Primitive and structured data types for feature values."""
 

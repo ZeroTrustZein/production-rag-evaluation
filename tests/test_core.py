@@ -478,7 +478,7 @@ class TestStreamingFeaturePipelineCore:
             auto_flush=False,
             deduplicate=True,
         )
-        q = RAGQuery(query_id="dup_query", query_text="Apple revenue 2024")
+        q = RAGQuery(query_id="dup_query", query_text="Apple revenue 2024", ticker="AAPL")
         pipeline.ingest(q)
         assert pipeline.buffer_count == 1
 
@@ -491,7 +491,12 @@ class TestStreamingFeaturePipelineCore:
         from production_rag_evaluation.features.pipeline import StreamingFeaturePipeline
         from production_rag_evaluation.features.store import ParquetFeatureStore
         from production_rag_evaluation.finance.metrics import FinancialRiskEngine
-        from production_rag_evaluation.models.schemas import EvaluationMetrics
+        from production_rag_evaluation.models.schemas import (
+            EvaluationMetrics,
+            HallucinationFinding,
+            HallucinationType,
+            Severity,
+        )
 
         pipeline = StreamingFeaturePipeline(
             store=ParquetFeatureStore(base_path=tmp_path / "fs"),
@@ -502,8 +507,23 @@ class TestStreamingFeaturePipelineCore:
         for i in range(4):
             eval_m = EvaluationMetrics(
                 faithfulness_score=0.90 if i > 0 else 0.40,
+                answer_relevance_score=0.90,
+                context_recall_score=0.90,
+                context_precision_score=0.90,
+                citation_grounding_score=0.90,
+                hallucination_rate=0.0 if i > 0 else 0.20,
                 overall_pass=(i > 0),
-                findings=[] if i > 0 else [{"finding_type": "NUMERICAL_DISTORTION"}],  # type: ignore
+                findings=[]
+                if i > 0
+                else [
+                    HallucinationFinding(
+                        finding_type=HallucinationType.NUMERICAL_DISTORTION,
+                        severity=Severity.HIGH,
+                        claim_text="Revenue was $10B",
+                        explanation="Contradicts context",
+                    )
+                ],
+                evaluation_latency_ms=10.0 * (i + 1),
                 metadata={"evaluation_id": f"eval_{i}", "latency_ms": 10.0 * (i + 1)},
             )
             pipeline.ingest(eval_m)
