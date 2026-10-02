@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -14,7 +13,6 @@ import pyarrow.parquet as pq
 from production_rag_evaluation.features.models import (
     FeatureGroup,
     FeatureRecord,
-    FeatureSchema,
 )
 
 

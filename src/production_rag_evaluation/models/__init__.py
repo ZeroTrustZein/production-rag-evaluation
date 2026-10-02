@@ -2,11 +2,13 @@
 
 from production_rag_evaluation.models.interfaces import (
     EvaluatorProtocol,
+    FeatureStoreProtocol,
     FinancialRiskEngineProtocol,
     HallucinationDetectorProtocol,
     MonteCarloStressTesterProtocol,
     RiskTelemetryCollectorProtocol,
     SemanticCacheProtocol,
+    StreamingPipelineProtocol,
 )
 from production_rag_evaluation.models.schemas import (
     AlertSeverity,
@@ -64,9 +66,11 @@ __all__ = [
     "TelemetryReport",
     # Protocols
     "EvaluatorProtocol",
+    "FeatureStoreProtocol",
     "FinancialRiskEngineProtocol",
     "HallucinationDetectorProtocol",
     "MonteCarloStressTesterProtocol",
     "RiskTelemetryCollectorProtocol",
     "SemanticCacheProtocol",
+    "StreamingPipelineProtocol",
 ]

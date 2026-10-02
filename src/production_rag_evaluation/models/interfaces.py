@@ -201,3 +201,46 @@ class RiskTelemetryCollectorProtocol(Protocol):
     ) -> TelemetryReport:
         """Generate synthesized monitoring report."""
         ...
+
+
+@runtime_checkable
+class FeatureStoreProtocol(Protocol):
+    """Contract for columnar Parquet feature stores."""
+
+    def write_records(
+        self,
+        records: List[Any],
+        compression: str = "snappy",
+    ) -> int:
+        """Persist a batch of feature records."""
+        ...
+
+    def count_records(self, group: Optional[Any] = None) -> int:
+        """Count total persisted records."""
+        ...
+
+    def storage_summary(self) -> Dict[str, Any]:
+        """Return diagnostic metrics on the stored features."""
+        ...
+
+
+@runtime_checkable
+class StreamingPipelineProtocol(Protocol):
+    """Contract for streaming feature extraction and ingestion pipelines."""
+
+    def ingest(self, item: Any) -> Optional[Any]:
+        """Ingest single item and extract features."""
+        ...
+
+    def ingest_batch(self, items: List[Any]) -> List[Any]:
+        """Ingest multiple items."""
+        ...
+
+    def flush(self) -> Any:
+        """Flush buffer to durable storage."""
+        ...
+
+    def stats(self) -> Dict[str, Any]:
+        """Return operational pipeline statistics."""
+        ...
+

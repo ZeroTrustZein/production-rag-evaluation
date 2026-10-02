@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from production_rag_evaluation.features.models import (
     FeatureDefinition,
@@ -129,7 +129,7 @@ class ChunkFeatureExtractor(BaseFeatureExtractor):
             entity_id=chunk.chunk_id,
             feature_group=FeatureGroup.CHUNK,
             features=features,
-            metadata={"ticker": chunk.ticker, "source": chunk.source_file},
+            metadata={"ticker": chunk.ticker, "source": chunk.source_url},
         )
 
 
@@ -172,7 +172,7 @@ class ResponseFeatureExtractor(BaseFeatureExtractor):
             entity_id=response.query_id,
             feature_group=FeatureGroup.RESPONSE,
             features=features,
-            metadata={"confidence": response.confidence_score},
+            metadata={"model_name": response.model_name, "latency_ms": response.latency_ms},
         )
 
 
@@ -185,11 +185,13 @@ class EvaluationFeatureExtractor(BaseFeatureExtractor):
             feature_group=FeatureGroup.EVALUATION,
             features=[
                 FeatureDefinition(name="faithfulness_score", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
-                FeatureDefinition(name="answer_relevancy_score", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
+                FeatureDefinition(name="answer_relevance_score", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
                 FeatureDefinition(name="context_precision_score", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
+                FeatureDefinition(name="context_recall_score", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
+                FeatureDefinition(name="citation_grounding_score", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
                 FeatureDefinition(name="hallucination_count", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.INT),
                 FeatureDefinition(name="overall_pass", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.BOOLEAN),
-                FeatureDefinition(name="latency_ms", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
+                FeatureDefinition(name="evaluation_latency_ms", feature_group=FeatureGroup.EVALUATION, value_type=FeatureValueType.FLOAT),
             ],
         )
         super().__init__(schema)
@@ -197,16 +199,19 @@ class EvaluationFeatureExtractor(BaseFeatureExtractor):
     def extract(self, metrics: EvaluationMetrics) -> FeatureRecord:
         features: Dict[str, Any] = {
             "faithfulness_score": metrics.faithfulness_score,
-            "answer_relevancy_score": metrics.answer_relevancy_score,
+            "answer_relevance_score": metrics.answer_relevance_score,
             "context_precision_score": metrics.context_precision_score,
+            "context_recall_score": metrics.context_recall_score,
+            "citation_grounding_score": metrics.citation_grounding_score,
             "hallucination_count": len(metrics.findings),
             "overall_pass": metrics.overall_pass,
-            "latency_ms": metrics.latency_ms,
+            "evaluation_latency_ms": metrics.evaluation_latency_ms,
         }
 
+        eval_id = str(metrics.metadata.get("evaluation_id", metrics.metadata.get("query_id", "eval_record")))
         return FeatureRecord(
-            entity_id=metrics.evaluation_id,
+            entity_id=eval_id,
             feature_group=FeatureGroup.EVALUATION,
             features=features,
-            metadata={"query_id": metrics.query_id},
+            metadata=dict(metrics.metadata),
         )
