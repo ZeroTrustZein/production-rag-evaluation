@@ -6,6 +6,7 @@ from production_rag_evaluation.features.extractors import (
     BaseFeatureExtractor,
     ChunkFeatureExtractor,
     EvaluationFeatureExtractor,
+    FinancialFeatureExtractor,
     QueryFeatureExtractor,
     ResponseFeatureExtractor,
 )
@@ -14,7 +15,10 @@ from production_rag_evaluation.features.models import (
     FeatureGroup,
     FeatureRecord,
     FeatureSchema,
+    FeatureStatistics,
     FeatureValueType,
+    OnlineFeatureVector,
+    SlidingWindowStats,
     StreamingBatchStats,
 )
 from production_rag_evaluation.features.pipeline import StreamingFeaturePipeline
@@ -26,7 +30,10 @@ __all__ = [
     "FeatureGroup",
     "FeatureRecord",
     "FeatureSchema",
+    "FeatureStatistics",
     "FeatureValueType",
+    "OnlineFeatureVector",
+    "SlidingWindowStats",
     "StreamingBatchStats",
     # Extractors
     "BaseFeatureExtractor",
@@ -34,7 +41,9 @@ __all__ = [
     "ChunkFeatureExtractor",
     "ResponseFeatureExtractor",
     "EvaluationFeatureExtractor",
+    "FinancialFeatureExtractor",
     # Engines & Pipelines
     "ParquetFeatureStore",
     "StreamingFeaturePipeline",
 ]
+

@@ -11,6 +11,7 @@ from production_rag_evaluation.features.extractors import (
     BaseFeatureExtractor,
     ChunkFeatureExtractor,
     EvaluationFeatureExtractor,
+    FinancialFeatureExtractor,
     QueryFeatureExtractor,
     ResponseFeatureExtractor,
 )
@@ -19,11 +20,15 @@ from production_rag_evaluation.features.models import (
     FeatureGroup,
     FeatureRecord,
     FeatureSchema,
+    FeatureStatistics,
     FeatureValueType,
+    OnlineFeatureVector,
+    SlidingWindowStats,
     StreamingBatchStats,
 )
 from production_rag_evaluation.features.pipeline import StreamingFeaturePipeline
 from production_rag_evaluation.features.store import ParquetFeatureStore
+
 from production_rag_evaluation.finance.metrics import FinancialRiskEngine
 from production_rag_evaluation.finance.stress_testing import MonteCarloStressTester
 from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
@@ -107,10 +112,14 @@ __all__ = [
     "FeatureGroup",
     "FeatureRecord",
     "FeatureSchema",
+    "FeatureStatistics",
     "FeatureValueType",
+    "FinancialFeatureExtractor",
+    "OnlineFeatureVector",
     "ParquetFeatureStore",
     "QueryFeatureExtractor",
     "ResponseFeatureExtractor",
+    "SlidingWindowStats",
     "StreamingBatchStats",
     "StreamingFeaturePipeline",
     # Protocols

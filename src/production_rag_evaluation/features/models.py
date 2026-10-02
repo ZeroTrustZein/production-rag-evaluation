@@ -89,3 +89,47 @@ class StreamingBatchStats(BaseModel):
     processing_time_ms: float = Field(ge=0.0, description="Elapsed execution time in milliseconds")
     storage_flush_success: bool = Field(default=True, description="Whether Parquet persistence succeeded")
     error_count: int = Field(default=0, ge=0, description="Number of extraction errors encountered")
+
+
+class FeatureStatistics(BaseModel):
+    """Statistical summary and distribution metrics for a single feature column."""
+
+    model_config = ConfigDict(frozen=True)
+
+    feature_name: str = Field(description="Feature identifier")
+    feature_group: FeatureGroup = Field(description="Feature group namespace")
+    count: int = Field(ge=0, description="Total observations analyzed")
+    null_count: int = Field(ge=0, description="Number of null or missing values")
+    mean: Optional[float] = Field(default=None, description="Arithmetic mean for numerical feature")
+    std: Optional[float] = Field(default=None, description="Sample standard deviation")
+    min_value: Optional[float] = Field(default=None, description="Minimum observed value")
+    max_value: Optional[float] = Field(default=None, description="Maximum observed value")
+    quantiles: Dict[str, float] = Field(default_factory=dict, description="Distribution quantiles (p25, p50, p75)")
+
+
+class SlidingWindowStats(BaseModel):
+    """Rolling statistical aggregations over streaming feature events."""
+
+    model_config = ConfigDict(frozen=True)
+
+    window_size: int = Field(ge=1, description="Number of observations in the sliding window")
+    count: int = Field(ge=0, description="Active count of elements in current window")
+    avg_latency_ms: float = Field(ge=0.0, default=0.0, description="Mean latency across window events")
+    overall_pass_rate: float = Field(ge=0.0, le=1.0, default=1.0, description="Proportion of passing evaluations")
+    avg_faithfulness: float = Field(ge=0.0, le=1.0, default=1.0, description="Mean faithfulness score")
+    rolling_hallucination_rate: float = Field(ge=0.0, le=1.0, default=0.0, description="Rolling hallucination frequency")
+
+
+class OnlineFeatureVector(BaseModel):
+    """Low-latency feature vector for online real-time inference."""
+
+    model_config = ConfigDict(frozen=True)
+
+    entity_id: str = Field(description="Target entity identifier")
+    feature_group: FeatureGroup = Field(description="Feature group namespace")
+    features: Dict[str, Any] = Field(default_factory=dict, description="Feature key-values")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Freshness timestamp of the feature observation",
+    )
+

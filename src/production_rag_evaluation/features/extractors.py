@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Union
+
+import numpy as np
 
 from production_rag_evaluation.features.models import (
     FeatureDefinition,
@@ -18,6 +21,7 @@ from production_rag_evaluation.models.schemas import (
     EvaluationMetrics,
     RAGQuery,
     RAGResponse,
+    RiskMetrics,
 )
 
 
@@ -35,6 +39,38 @@ class BaseFeatureExtractor(ABC):
     def extract(self, item: Any) -> FeatureRecord:
         """Extract features from the incoming input item."""
         pass
+
+    def validate(self, record: FeatureRecord) -> bool:
+        """Validate an extracted FeatureRecord against the schema definition."""
+        if record.feature_group != self.schema.feature_group:
+            return False
+        for feat_def in self.schema.features:
+            if feat_def.name not in record.features:
+                if not feat_def.nullable and feat_def.default_value is None:
+                    return False
+                continue
+            val = record.features[feat_def.name]
+            if val is None:
+                if not feat_def.nullable:
+                    return False
+                continue
+            if feat_def.value_type == FeatureValueType.FLOAT:
+                if not isinstance(val, (float, int)) or isinstance(val, bool):
+                    return False
+            elif feat_def.value_type == FeatureValueType.INT:
+                if not isinstance(val, int) or isinstance(val, bool):
+                    return False
+            elif feat_def.value_type == FeatureValueType.STRING:
+                if not isinstance(val, str):
+                    return False
+            elif feat_def.value_type == FeatureValueType.BOOLEAN:
+                if not isinstance(val, bool):
+                    return False
+            elif feat_def.value_type == FeatureValueType.LIST_FLOAT:
+                if not isinstance(val, (list, tuple, np.ndarray)):
+                    return False
+        return True
+
 
 
 class QueryFeatureExtractor(BaseFeatureExtractor):
@@ -215,3 +251,57 @@ class EvaluationFeatureExtractor(BaseFeatureExtractor):
             features=features,
             metadata=dict(metrics.metadata),
         )
+
+
+class FinancialFeatureExtractor(BaseFeatureExtractor):
+    """Extracts risk indicators and portfolio metrics into durable feature records."""
+
+    def __init__(self) -> None:
+        schema = FeatureSchema(
+            name="rag_financial_features",
+            feature_group=FeatureGroup.FINANCIAL,
+            features=[
+                FeatureDefinition(name="sharpe_ratio", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
+                FeatureDefinition(name="sortino_ratio", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
+                FeatureDefinition(name="max_drawdown", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
+                FeatureDefinition(name="annualized_volatility", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
+                FeatureDefinition(name="calmar_ratio", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
+                FeatureDefinition(name="var_95", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
+                FeatureDefinition(name="cvar_95", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.FLOAT),
+                FeatureDefinition(name="risk_profile", feature_group=FeatureGroup.FINANCIAL, value_type=FeatureValueType.STRING),
+            ],
+        )
+        super().__init__(schema)
+
+    def extract(self, item: Any) -> FeatureRecord:
+        if isinstance(item, RiskMetrics):
+            metrics = item
+        elif isinstance(item, (np.ndarray, list)):
+            from production_rag_evaluation.finance.metrics import FinancialRiskEngine
+
+            engine = FinancialRiskEngine()
+            metrics = engine.compute_all_metrics(np.asarray(item, dtype=float))
+        elif hasattr(item, "risk_metrics") and isinstance(item.risk_metrics, RiskMetrics):
+            metrics = item.risk_metrics
+        else:
+            raise ValueError(f"Unsupported item type for FinancialFeatureExtractor: {type(item)}")
+
+        features: Dict[str, Any] = {
+            "sharpe_ratio": float(metrics.sharpe_ratio),
+            "sortino_ratio": float(metrics.sortino_ratio),
+            "max_drawdown": float(metrics.max_drawdown),
+            "annualized_volatility": float(metrics.annualized_volatility),
+            "calmar_ratio": float(metrics.calmar_ratio),
+            "var_95": float(metrics.var_95),
+            "cvar_95": float(metrics.cvar_95),
+            "risk_profile": metrics.risk_profile.value,
+        }
+
+        entity_id = f"fin_{metrics.risk_profile.value.lower()}"
+        return FeatureRecord(
+            entity_id=entity_id,
+            feature_group=FeatureGroup.FINANCIAL,
+            features=features,
+            metadata={"computed_at": datetime.now(timezone.utc).isoformat()},
+        )
+
