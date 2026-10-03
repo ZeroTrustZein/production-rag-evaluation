@@ -25,7 +25,6 @@ from production_rag_evaluation.models.schemas import (
     NumericalTarget,
     RAGQuery,
     RAGResponse,
-    ReturnFrequency,
     StressScenarioType,
     StressTestConfig,
 )
@@ -197,18 +196,27 @@ def handle_rag_evaluate(
     eval_mode = EvaluationMode(mode.upper()) if hasattr(EvaluationMode, mode.upper()) else EvaluationMode.THOROUGH
     metrics = evaluator.evaluate(rag_query, rag_resp, mode=eval_mode)
 
+    overall_score = float(
+        np.mean([
+            metrics.faithfulness_score,
+            metrics.answer_relevance_score,
+            metrics.context_precision_score,
+            metrics.citation_grounding_score,
+        ])
+    )
+
     return {
-        "overall_score": round(metrics.overall_score, 4),
+        "overall_score": round(overall_score, 4),
         "faithfulness_score": round(metrics.faithfulness_score, 4),
         "answer_relevance_score": round(metrics.answer_relevance_score, 4),
         "context_precision_score": round(metrics.context_precision_score, 4),
-        "passed_thresholds": metrics.passed_thresholds,
-        "hallucination_count": metrics.hallucination_count,
-        "claims_total": metrics.claims_total,
-        "claims_verified": metrics.claims_verified,
-        "citations_count": len(metrics.citations),
-        "evaluation_mode": metrics.mode.value,
-        "latency_ms": round(metrics.latency_ms, 2),
+        "context_recall_score": round(metrics.context_recall_score, 4),
+        "citation_grounding_score": round(metrics.citation_grounding_score, 4),
+        "hallucination_rate": round(metrics.hallucination_rate, 4),
+        "overall_pass": metrics.overall_pass,
+        "findings_count": len(metrics.findings),
+        "claim_verifications_count": len(metrics.claim_verifications),
+        "evaluation_latency_ms": round(metrics.evaluation_latency_ms, 2),
     }
 
 
@@ -289,14 +297,16 @@ def handle_rag_risk_metrics(
         "sortino_ratio": round(metrics.sortino_ratio, 4),
         "calmar_ratio": round(metrics.calmar_ratio, 4),
         "var_95": round(metrics.var_95, 6),
-        "var_99": round(metrics.var_99, 6),
+        "var_99": round(metrics.var_99, 6) if metrics.var_99 is not None else None,
         "cvar_95": round(metrics.cvar_95, 6),
-        "cvar_99": round(metrics.cvar_99, 6),
+        "cvar_99": round(metrics.cvar_99, 6) if metrics.cvar_99 is not None else None,
         "max_drawdown": round(metrics.max_drawdown, 6),
         "annualized_return": round(metrics.annualized_return, 4),
         "annualized_volatility": round(metrics.annualized_volatility, 4),
         "downside_deviation": round(metrics.downside_deviation, 4),
-        "risk_profile": metrics.risk_profile.value,
+        "information_ratio": round(metrics.information_ratio, 4) if metrics.information_ratio is not None else None,
+        "beta": round(metrics.beta, 4) if metrics.beta is not None else None,
+        "alpha": round(metrics.alpha, 4) if metrics.alpha is not None else None,
     }
 
 
@@ -317,24 +327,24 @@ def handle_rag_stress_test(
         else StressScenarioType.BASELINE
     )
     config = StressTestConfig(
-        num_simulations=num_simulations,
-        horizon_days=horizon_days,
+        n_simulations=num_simulations,
+        horizon_steps=horizon_days,
         scenario_type=scen_type,
-        confidence_interval=confidence_interval,
     )
 
     result = tester.run_stress_test(ret_arr, config=config)
     return {
-        "scenario": result.scenario.value,
-        "simulations_count": result.simulations_count,
-        "horizon_days": result.horizon_days,
-        "mean_terminal_return": round(result.mean_terminal_return, 6),
-        "median_terminal_return": round(result.median_terminal_return, 6),
-        "terminal_percentiles": {k: round(v, 6) for k, v in result.terminal_percentiles.items()},
-        "probability_of_loss": round(result.probability_of_loss, 4),
-        "max_simulated_drawdown": round(result.max_simulated_drawdown, 6),
-        "var_stressed": round(result.var_stressed, 6),
-        "cvar_stressed": round(result.cvar_stressed, 6),
+        "scenario": result.scenario_type.value,
+        "n_simulations": result.n_simulations,
+        "horizon_steps": result.horizon_steps,
+        "mean_terminal": round(result.mean_terminal, 6),
+        "std_terminal": round(result.std_terminal, 6),
+        "p5_terminal": round(result.p5_terminal, 6),
+        "p50_terminal": round(result.p50_terminal, 6),
+        "p95_terminal": round(result.p95_terminal, 6),
+        "worst_case_drawdown": round(result.worst_case_drawdown, 6),
+        "stress_pass": result.stress_pass,
+        "breach_probability": round(result.breach_probability, 4),
     }
 
 

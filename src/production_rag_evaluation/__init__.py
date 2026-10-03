@@ -45,6 +45,37 @@ from production_rag_evaluation.features.store import ParquetFeatureStore
 from production_rag_evaluation.finance.metrics import FinancialRiskEngine
 from production_rag_evaluation.finance.stress_testing import MonteCarloStressTester
 from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
+from production_rag_evaluation.mcp.models import (
+    JSONRPCError,
+    JSONRPCRequest,
+    JSONRPCResponse,
+    MCPConfig,
+    MCPPrompt,
+    MCPPromptArgument,
+    MCPPromptMessage,
+    MCPProtocolVersion,
+    MCPResource,
+    MCPTool,
+    MCPTransport,
+    ToolCallResult,
+    ToolParameter,
+)
+from production_rag_evaluation.mcp.prompts import (
+    MCPPromptRegistry,
+    get_default_prompt_registry,
+)
+from production_rag_evaluation.mcp.resources import (
+    MCPResourceRegistry,
+    get_default_resource_registry,
+)
+from production_rag_evaluation.mcp.server import (
+    MCPServer,
+    create_mcp_server,
+)
+from production_rag_evaluation.mcp.tools import (
+    MCPToolRegistry,
+    get_default_tool_registry,
+)
 from production_rag_evaluation.models.interfaces import (
     EvaluationFeatureHandlerProtocol,
     EvaluatorProtocol,
@@ -149,6 +180,28 @@ __all__ = [
     "StreamingBatchStats",
     "StreamingFeaturePipeline",
     "get_default_registry",
+    # MCP (Model Context Protocol)
+    "MCPServer",
+    "create_mcp_server",
+    "MCPConfig",
+    "MCPTransport",
+    "MCPProtocolVersion",
+    "MCPTool",
+    "MCPToolRegistry",
+    "get_default_tool_registry",
+    "ToolParameter",
+    "ToolCallResult",
+    "MCPResource",
+    "MCPResourceRegistry",
+    "get_default_resource_registry",
+    "MCPPrompt",
+    "MCPPromptArgument",
+    "MCPPromptMessage",
+    "MCPPromptRegistry",
+    "get_default_prompt_registry",
+    "JSONRPCRequest",
+    "JSONRPCResponse",
+    "JSONRPCError",
     # Protocols
     "EvaluationFeatureHandlerProtocol",
     "EvaluatorProtocol",
