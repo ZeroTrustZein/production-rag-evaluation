@@ -201,3 +201,132 @@ class RiskTelemetryCollectorProtocol(Protocol):
     ) -> TelemetryReport:
         """Generate synthesized monitoring report."""
         ...
+
+
+@runtime_checkable
+class FeatureStoreProtocol(Protocol):
+    """Contract for columnar Parquet feature stores."""
+
+    def write_records(
+        self,
+        records: List[Any],
+        compression: str = "snappy",
+    ) -> int:
+        """Persist a batch of feature records."""
+        ...
+
+    def count_records(self, group: Optional[Any] = None) -> int:
+        """Count total persisted records."""
+        ...
+
+    def storage_summary(self) -> Dict[str, Any]:
+        """Return diagnostic metrics on the stored features."""
+        ...
+
+    def get_online_features(
+        self,
+        entity_ids: List[str],
+        feature_names: Optional[List[str]] = None,
+        group: Optional[Any] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Retrieve real-time features for entity IDs."""
+        ...
+
+
+@runtime_checkable
+class StreamingPipelineProtocol(Protocol):
+    """Contract for streaming feature extraction and ingestion pipelines."""
+
+    def ingest(self, item: Any) -> Optional[Any]:
+        """Ingest single item and extract features."""
+        ...
+
+    def ingest_batch(self, items: List[Any]) -> List[Any]:
+        """Ingest multiple items."""
+        ...
+
+    def flush(self) -> Any:
+        """Flush buffer to durable storage."""
+        ...
+
+    def stats(self) -> Dict[str, Any]:
+        """Return operational pipeline statistics."""
+        ...
+
+
+@runtime_checkable
+class FeatureRegistryProtocol(Protocol):
+    """Contract for feature schema and catalog registries."""
+
+    def register_schema(self, schema: Any) -> None:
+        """Register or update a schema specification."""
+        ...
+
+    def get_schema(self, group: Any) -> Optional[Any]:
+        """Retrieve schema for a feature group."""
+        ...
+
+    def validate_record(self, record: Any, strict: bool = False) -> Any:
+        """Validate a feature record against registered schema."""
+        ...
+
+
+@runtime_checkable
+class EvaluationFeatureHandlerProtocol(Protocol):
+    """Contract for evaluation subsystem integration handlers."""
+
+    def handle_evaluation(
+        self,
+        query: Any,
+        response: Any,
+        metrics: Any,
+        flush_immediately: bool = False,
+    ) -> List[Any]:
+        """Ingest evaluation pass artifacts into the feature store."""
+        ...
+
+    def handle_batch_evaluations(
+        self,
+        pairs: List[Tuple[Any, Any]],
+        metrics_list: List[Any],
+        flush_immediately: bool = True,
+    ) -> List[Any]:
+        """Ingest batch evaluation results into the feature store."""
+        ...
+
+
+@runtime_checkable
+class FeatureCompactionProtocol(Protocol):
+    """Contract for Parquet storage compaction and retention handlers."""
+
+    def compact_group(
+        self,
+        group: Any,
+        ttl_seconds: Optional[float] = None,
+        compression: str = "snappy",
+    ) -> Any:
+        """Compact a single feature group partition."""
+        ...
+
+    def compact_all(
+        self,
+        ttl_seconds: Optional[float] = None,
+        compression: str = "snappy",
+    ) -> Dict[Any, Any]:
+        """Compact all feature group partitions."""
+        ...
+
+
+@runtime_checkable
+class FeatureDriftDetectorProtocol(Protocol):
+    """Contract for statistical feature drift detection."""
+
+    def detect_feature_drift(
+        self,
+        feature_name: str,
+        group: Any,
+        current_records: Optional[List[Any]] = None,
+        psi_threshold: float = 0.25,
+    ) -> Any:
+        """Detect distribution shift for a specific feature."""
+        ...

@@ -6,12 +6,15 @@ import numpy as np
 from click.testing import CliRunner
 
 from production_rag_evaluation import (
+    FeatureGroup,
     FinancialRiskEngine,
     HallucinationDetector,
     MonteCarloStressTester,
+    ParquetFeatureStore,
     RAGEvaluator,
     RiskTelemetryCollector,
     SemanticCache,
+    StreamingFeaturePipeline,
     __version__,
 )
 from production_rag_evaluation.cli.main import cli
@@ -32,6 +35,8 @@ def test_package_metadata():
     assert RAGEvaluator is not None
     assert SemanticCache is not None
     assert FinancialRiskEngine is not None
+    assert ParquetFeatureStore is not None
+    assert StreamingFeaturePipeline is not None
 
 
 def test_schemas_instantiation(sample_chunk_apple: DocumentChunk):
@@ -243,3 +248,40 @@ def test_cli_subcommands(cli_runner: CliRunner, sample_chunk_apple: DocumentChun
     r_tel = cli_runner.invoke(cli, ["telemetry", "--json-out"])
     assert r_tel.exit_code == 0
     assert "total_evaluations" in r_tel.output
+
+
+def test_feature_store_and_streaming_pipeline(tmp_path, sample_chunk_apple: DocumentChunk):
+    """Test feature extraction, buffering, and Parquet storage in scaffold."""
+    store = ParquetFeatureStore(base_path=tmp_path / "feat_store")
+    pipeline = StreamingFeaturePipeline(store=store, buffer_size=2, auto_flush=False)
+
+    q = RAGQuery(query_id="q1", query_text="What was Apple revenue?", ticker="AAPL")
+    rec_q = pipeline.ingest(q)
+    assert rec_q is not None
+    assert rec_q.feature_group == FeatureGroup.QUERY
+    assert rec_q.features["has_ticker"] is True
+    assert pipeline.buffer_count == 1
+
+    rec_c = pipeline.ingest(sample_chunk_apple)
+    assert rec_c is not None
+    assert rec_c.feature_group == FeatureGroup.CHUNK
+    assert pipeline.buffer_count == 2
+
+    # Flush to parquet
+    batch_stats = pipeline.flush()
+    assert batch_stats.storage_flush_success is True
+    assert batch_stats.records_ingested == 2
+    assert pipeline.buffer_count == 0
+
+    # Query back
+    stored_q = store.read_records(FeatureGroup.QUERY, entity_id="q1")
+    assert len(stored_q) == 1
+    assert stored_q[0].features["has_ticker"] is True
+
+    stored_c = store.read_records(FeatureGroup.CHUNK)
+    assert len(stored_c) == 1
+    assert stored_c[0].features["doc_type_code"] == DocumentType.SEC_10K.value
+
+    assert store.count_records() == 2
+    summary = store.storage_summary()
+    assert summary["total_records"] == 2

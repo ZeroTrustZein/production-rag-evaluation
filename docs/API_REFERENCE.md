@@ -494,3 +494,205 @@ CLI entry points: `rag-eval` or `production-rag-eval`.
 | `telemetry` | Generates a system health and operational telemetry report. |
 | `cache stats` | Displays semantic cache capacity, hit counts, and hit rate. |
 | `cache clear` | Clears all entries from the semantic evaluation cache. |
+| `feature-store stats` | Displays record counts, partitions, and storage byte metrics. |
+| `feature-store list-schemas` | Lists registered schemas, feature definitions, and types. |
+| `feature-store compact` | Compacts Parquet files, purges duplicates, and prunes TTL. |
+| `feature-store export` | Exports aligned multi-group training matrix (Parquet/CSV/Arrow). |
+| `feature-store drift` | Computes PSI drift reports and detects distribution shift. |
+
+---
+
+## 12. Feature Store & Streaming Pipeline (`production_rag_evaluation.features`)
+
+High-throughput streaming feature extraction, PyArrow columnar persistence, schema enforcement, compaction, and statistical drift auditing.
+
+### 12.1 Enums & Data Models (`features.models`)
+
+#### `FeatureValueType` (Enum)
+Supported data types for engineered features:
+- `FLOAT`: 64-bit floating point (`pa.float64()`).
+- `INT`: 64-bit signed integer (`pa.int64()`).
+- `STRING`: UTF-8 textual string (`pa.string()`).
+- `BOOLEAN`: Boolean flag (`pa.bool_()`).
+- `VECTOR`: Variable-length 1D float vector (`pa.list_(pa.float64())`).
+- `JSON`: Serialized JSON payload string (`pa.string()`).
+
+#### `FeatureGroup` (Enum)
+Feature group namespace partitions:
+- `QUERY`: Inbound query characteristics.
+- `CHUNK`: Retrieved context chunk properties.
+- `RESPONSE`: Generated response metrics.
+- `EVALUATION`: Evaluator DAG and verification metrics.
+- `FINANCIAL`: Domain financial attributes and telemetry.
+
+#### `FeatureDefinition` (Pydantic Model)
+- `name: str`: Unique identifier for the feature.
+- `value_type: FeatureValueType`: Strongly-typed schema indicator.
+- `description: str`: Human-readable semantic documentation.
+- `nullable: bool`: Whether `None` values are permitted (default: `True`).
+- `default_value: Optional[Any]`: Optional fallback value if extraction is missing.
+
+#### `FeatureSchema` (Pydantic Model)
+- `name: str`: Schema name.
+- `group: FeatureGroup`: Associated feature group namespace.
+- `version: str`: Semantic version string (default: `"1.0.0"`).
+- `features: List[FeatureDefinition]`: Ordered feature definitions.
+
+#### `FeatureRecord` (Pydantic Model)
+- `entity_id: str`: Unique query or session identifier.
+- `feature_group: FeatureGroup`: Group namespace.
+- `timestamp: float`: Unix epoch timestamp.
+- `values: Dict[str, Any]`: Key-value feature map conforming to the schema.
+
+#### `OnlineFeatureVector` (Pydantic Model)
+- `entity_id: str`: Associated entity identifier.
+- `features: Dict[str, Any]`: Flattened feature dictionary across all groups.
+- `vector: List[float]`: Normalized numerical vector suitable for low-latency scoring.
+- `timestamp: float`: Generation timestamp.
+
+#### `FeatureDriftReport` (Pydantic Model)
+- `feature_name: str`: Target feature identifier.
+- `feature_group: FeatureGroup`: Feature group namespace.
+- `psi_score: float`: Population Stability Index score.
+- `drift_detected: bool`: `True` if `psi_score >= psi_threshold`.
+- `threshold: float`: Alert boundary (default: `0.25`).
+- `baseline_mean: float`, `target_mean: float`: Mean shift comparison.
+- `baseline_variance: float`, `target_variance: float`: Dispersion comparison.
+- `num_baseline_samples: int`, `num_target_samples: int`: Sample sizes.
+
+#### `CompactionResult` (Pydantic Model)
+- `feature_group: FeatureGroup`: Compacted namespace.
+- `original_records: int`: Record count before compaction.
+- `retained_records: int`: Record count after deduplication and TTL pruning.
+- `purged_records: int`: Number of deduplicated or expired records dropped.
+- `output_file: str`: Resulting Parquet file path.
+- `file_size_bytes: int`: Final storage footprint on disk.
+
+#### `ExportFormat` (Enum)
+- `PARQUET`, `CSV`, `JSON`, `ARROW`.
+
+---
+
+### 12.2 Columnar Storage Engine (`features.store`)
+
+### Class: `ParquetFeatureStore`
+Manages on-disk columnar Apache Parquet files organized by feature group partitions.
+
+#### Constructor
+```python
+ParquetFeatureStore(
+    base_path: Union[str, Path] = "./data/feature_store",
+    default_compression: str = "snappy",
+)
+```
+
+#### Methods
+- **`write_features(features: List[FeatureRecord], compression: Optional[str] = None) -> int`**:
+  Appends or overwrites feature records to the corresponding group partition. Returns count of written records.
+- **`read_features(group: FeatureGroup, entity_ids: Optional[List[str]] = None, start_time: Optional[float] = None, end_time: Optional[float] = None, columns: Optional[List[str]] = None, limit: Optional[int] = None) -> List[FeatureRecord]`**:
+  Queries features with optional predicate pushdown and column projection.
+- **`get_entity_features(entity_id: str, groups: Optional[List[FeatureGroup]] = None) -> Dict[str, Any]`**:
+  Retrieves point-in-time features for an entity ID merged across specified feature groups.
+- **`get_feature_vector(entity_id: str, feature_names: List[str], group: FeatureGroup) -> np.ndarray`**:
+  Fetches an ordered 1D NumPy array for a specified list of numerical features.
+- **`list_entities(group: FeatureGroup, limit: Optional[int] = None) -> List[str]`**:
+  Lists distinct entity IDs available in a feature group partition.
+- **`storage_summary() -> Dict[str, Any]`**:
+  Returns storage breakdown (file size, row count, columns, row groups) across all groups.
+- **`delete_group(group: FeatureGroup) -> bool`**:
+  Removes storage partition for a feature group.
+
+---
+
+### 12.3 Schema Registry (`features.registry`)
+
+### Class: `FeatureRegistry`
+Maintains schemas, type definitions, and Arrow serialization mappings for all feature groups.
+
+#### Methods
+- **`register_schema(schema: FeatureSchema) -> None`**: Registers a new or updated schema.
+- **`get_schema(group: FeatureGroup) -> Optional[FeatureSchema]`**: Fetches schema for a group.
+- **`list_schemas() -> Dict[FeatureGroup, FeatureSchema]`**: Lists all registered schemas.
+- **`validate_record(record: FeatureRecord) -> SchemaValidationResult`**: Validates a `FeatureRecord` against registered schema.
+- **`to_pyarrow_schema(group: FeatureGroup) -> pa.Schema`**: Generates a strongly-typed `pyarrow.Schema` incorporating metadata columns.
+
+#### Helper
+- **`get_default_registry() -> FeatureRegistry`**: Returns a pre-configured registry loaded with standard `production-rag-evaluation` schemas.
+
+---
+
+### 12.4 Feature Extractors (`features.extractors`)
+
+Specialized extractors that derive quantitative and categorical signals from raw RAG artifacts.
+
+- **`QueryFeatureExtractor`**:
+  Extracts `token_length`, `financial_entity_count`, `complexity_score`, `query_type`, `sentiment_polarity`.
+- **`ChunkFeatureExtractor`**:
+  Extracts `token_length`, `numerical_density`, `has_financial_table`, `readability_score`.
+- **`ResponseFeatureExtractor`**:
+  Extracts `character_length`, `citation_density`, `hedge_word_ratio`, `numerical_claim_count`.
+- **`EvaluationFeatureExtractor`**:
+  Extracts `faithfulness_score`, `relevance_score`, `context_precision`, `context_recall`, `overall_score`.
+- **`FinancialFeatureExtractor`**:
+  Extracts `ticker`, `fiscal_period`, `monetary_amount_count`, `metric_reference_count`, `risk_level`.
+
+All extractors inherit from `BaseFeatureExtractor` and expose:
+```python
+extract(*args, entity_id: str, **kwargs) -> FeatureRecord
+```
+
+---
+
+### 12.5 Streaming Pipeline (`features.pipeline`)
+
+### Class: `StreamingFeaturePipeline`
+Coordinates streaming ingestion, in-memory buffering, and periodic Parquet flushes.
+
+#### Constructor
+```python
+StreamingFeaturePipeline(
+    store: Optional[ParquetFeatureStore] = None,
+    registry: Optional[FeatureRegistry] = None,
+    batch_size: int = 100,
+    buffer_max_size: int = 10000,
+)
+```
+
+#### Methods
+- **`ingest(records: List[FeatureRecord]) -> int`**: Validates and buffers records, automatically triggering `flush()` when `batch_size` is exceeded.
+- **`ingest_query_response(entity_id: str, query: str, response: str, chunk: Optional[str] = None, metrics: Optional[EvaluationMetrics] = None, ticker: Optional[str] = None, period: Optional[str] = None) -> OnlineFeatureVector`**:
+  Extracts features across all active domains, updates buffers, and returns an `OnlineFeatureVector`.
+- **`flush() -> int`**: Writes all buffered records to the underlying `ParquetFeatureStore`.
+- **`get_online_vector(entity_id: str) -> Optional[OnlineFeatureVector]`**: Fetches latest in-memory feature vector for immediate serving.
+- **`get_window_stats(group: FeatureGroup) -> SlidingWindowStats`**: Returns streaming statistical distributions for a feature group.
+
+---
+
+### 12.6 Feature Drift Detector (`features.drift`)
+
+### Class: `FeatureDriftDetector`
+Computes Population Stability Index (PSI) and monitors statistical drift across Parquet partitions.
+
+#### Methods
+- **`calculate_psi(baseline: np.ndarray, target: np.ndarray, num_buckets: int = 10, epsilon: float = 1e-4) -> float`** *(static)*:
+  Computes PSI between baseline and target numerical samples.
+- **`detect_feature_drift(feature_name: str, group: FeatureGroup, current_records: Optional[List[FeatureRecord]] = None, baseline_entity_ids: Optional[List[str]] = None, target_entity_ids: Optional[List[str]] = None, psi_threshold: float = 0.25) -> FeatureDriftReport`**:
+  Executes drift detection on an individual named feature.
+- **`detect_all_drift(group: Optional[FeatureGroup] = None, current_records: Optional[List[FeatureRecord]] = None, psi_threshold: float = 0.25) -> List[FeatureDriftReport]`**:
+  Scans all numeric features in a group (or all groups) and returns drift reports.
+- **`generate_telemetry_alerts(collector: Optional[RiskTelemetryCollector] = None, reports: Optional[List[FeatureDriftReport]] = None, psi_threshold: float = 0.25) -> List[TelemetryAlert]`**:
+  Converts drift reports exceeding threshold into `TelemetryAlert` notifications and registers them with the collector.
+
+---
+
+### 12.7 Integration Handlers (`features.handlers`)
+
+- **`EvaluationFeatureHandler(pipeline: Optional[StreamingFeaturePipeline] = None)`**:
+  Connects `RAGEvaluator` results to feature store extraction automatically.
+- **`FeatureCompactionHandler(store: ParquetFeatureStore)`**:
+  Performs file consolidation, deduplication by `entity_id`, and TTL eviction.
+  - `compact_group(group: FeatureGroup, ttl_seconds: Optional[float] = None, compression: str = "snappy") -> CompactionResult`
+  - `compact_all(ttl_seconds: Optional[float] = None, compression: str = "snappy") -> Dict[FeatureGroup, CompactionResult]`
+- **`FeatureExportHandler(store: ParquetFeatureStore)`**:
+  Generates point-in-time aligned offline datasets across groups for entity lists.
+  - `export_dataset(entity_ids: List[str], output_path: Union[str, Path], format: ExportFormat = ExportFormat.PARQUET, groups: Optional[List[FeatureGroup]] = None) -> Path`

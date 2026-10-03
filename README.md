@@ -54,9 +54,17 @@ Detailed technical guides and reference manuals are available in the [`docs/`](d
   - Two-sample Welch's t-test identifying statistically significant performance degradation.
   - Multi-tier operational alerting (`INFO`, `WARNING`, `ERROR`, `CRITICAL`) with pub/sub callbacks.
   - System health state machine (`HEALTHY` $\to$ `DEGRADED` $\to$ `UNHEALTHY`).
+- **Columnar Feature Store & Streaming Pipeline (`features`)**:
+  - Strongly-typed schema registry (`FeatureRegistry`) across 5 domains (`QUERY`, `CHUNK`, `RESPONSE`, `EVALUATION`, `FINANCIAL`).
+  - High-throughput streaming pipeline (`StreamingFeaturePipeline`) with in-memory buffering and batch flushes.
+  - Columnar Apache Parquet storage (`ParquetFeatureStore`) with predicate pushdown and column projection.
+  - Population Stability Index (PSI) drift detection (`FeatureDriftDetector`) with automated telemetry alerts.
+  - Automated partition compaction, entity deduplication, and configurable TTL data retention.
+  - Point-in-time multi-group join matrix export to Parquet, CSV, JSON, and Arrow.
 - **Production CLI & Script Automation (`rag-eval`)**:
   - Full support for interactive Rich tables and scriptable `--json-out`.
   - Batch evaluation from JSON and JSONL datasets with p95 latency reporting.
+  - Feature store management commands (`rag-eval feature-store stats/compact/export/drift/list-schemas`).
   - Cache management commands (`rag-eval cache stats`, `rag-eval cache clear`).
 
 ---
@@ -94,6 +102,16 @@ Detailed technical guides and reference manuals are available in the [`docs/`](d
 |  - FinancialRiskEngine (Sharpe, Sortino, Calmar, Historical & Cornish-Fisher VaR)  |
 |  - MonteCarloStressTester (GBM Paths, Fat-Tailed Student-t, 6 Stress Presets)     |
 |  - RiskTelemetryCollector (Rolling Windows, Welch's t-Test, Health & Alerts)     |
++---------------------------------------------+-------------------------------------+
+                                              |
+                                              v
++-----------------------------------------------------------------------------------+
+|                  Streaming Feature Store & Parquet Analytics Engine               |
+|  - FeatureRegistry (Schemas: QUERY, CHUNK, RESPONSE, EVALUATION, FINANCIAL)       |
+|  - StreamingFeaturePipeline (Sliding Windows, In-Memory Buffers, Batch Flushes)   |
+|  - ParquetFeatureStore (Columnar Storage, Snappy/ZSTD Compression, Partitions)    |
+|  - FeatureDriftDetector (Population Stability Index / PSI Shifts & Alerts)       |
+|  - Handlers (Compaction, Deduplication, TTL Retention, Offline Training Export)   |
 +-----------------------------------------------------------------------------------+
 ```
 
@@ -201,6 +219,11 @@ rag-eval telemetry --check-drift --drift-metric faithfulness_score
 
 # 6. Cache stats
 rag-eval cache stats
+
+# 7. Columnar feature store storage metrics & PSI drift detection
+rag-eval feature-store stats --path ./data/feature_store
+rag-eval feature-store drift --path ./data/feature_store --psi-threshold 0.25
+rag-eval feature-store compact --path ./data/feature_store --ttl 2592000
 ```
 
 ---
@@ -220,6 +243,14 @@ production-rag-evaluation/
 |   |   |-- evaluator.py           # Top-level evaluation orchestrator
 |   |   |-- graph.py               # NetworkX topological DAG state machine
 |   |   +-- hallucination.py       # Specialized financial hallucination detection rules
+|   |-- features/
+|   |   |-- drift.py               # Population Stability Index (PSI) drift detection
+|   |   |-- extractors.py          # Domain feature extractors (Query, Chunk, Response, Eval, Finance)
+|   |   |-- handlers.py            # Evaluation hooks, compaction, and dataset export handlers
+|   |   |-- models.py              # Feature schemas, records, online vectors, and compaction models
+|   |   |-- pipeline.py            # Streaming feature ingestion and buffering pipeline
+|   |   |-- registry.py            # Strongly-typed schema registry and PyArrow mappings
+|   |   +-- store.py               # Columnar Apache Parquet storage engine
 |   |-- finance/
 |   |   |-- metrics.py             # Sharpe, Sortino, Calmar, Drawdown & Cornish-Fisher VaR
 |   |   |-- stress_testing.py      # Monte Carlo GBM & fat-tailed Student-t stress simulator

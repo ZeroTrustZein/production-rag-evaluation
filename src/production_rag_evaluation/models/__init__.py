@@ -1,12 +1,18 @@
 """Domain models, schemas, and protocol interfaces."""
 
 from production_rag_evaluation.models.interfaces import (
+    EvaluationFeatureHandlerProtocol,
     EvaluatorProtocol,
+    FeatureCompactionProtocol,
+    FeatureDriftDetectorProtocol,
+    FeatureRegistryProtocol,
+    FeatureStoreProtocol,
     FinancialRiskEngineProtocol,
     HallucinationDetectorProtocol,
     MonteCarloStressTesterProtocol,
     RiskTelemetryCollectorProtocol,
     SemanticCacheProtocol,
+    StreamingPipelineProtocol,
 )
 from production_rag_evaluation.models.schemas import (
     AlertSeverity,
@@ -63,10 +69,16 @@ __all__ = [
     "TelemetryAlert",
     "TelemetryReport",
     # Protocols
+    "EvaluationFeatureHandlerProtocol",
     "EvaluatorProtocol",
+    "FeatureCompactionProtocol",
+    "FeatureDriftDetectorProtocol",
+    "FeatureRegistryProtocol",
+    "FeatureStoreProtocol",
     "FinancialRiskEngineProtocol",
     "HallucinationDetectorProtocol",
     "MonteCarloStressTesterProtocol",
     "RiskTelemetryCollectorProtocol",
     "SemanticCacheProtocol",
+    "StreamingPipelineProtocol",
 ]

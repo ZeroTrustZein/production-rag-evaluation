@@ -347,3 +347,118 @@ Operational state transitions based on telemetry conditions:
 - **`HEALTHY`**: Zero active alerts; hallucination rate below threshold, risk metrics within bounds.
 - **`DEGRADED`**: Warning-level alerts active (e.g., mild drift, elevated latency).
 - **`UNHEALTHY`**: Critical-level alerts active (e.g., hallucination rate spike, stress test failure).
+
+---
+
+## 8. Streaming Feature Pipeline & Columnar Parquet Feature Store Architecture
+
+The feature store subsystem decouples real-time inference telemetry from downstream model retraining, drift auditing, and analytical reporting. It provides a dual-path architecture: a low-latency streaming pipeline for online feature vectors and a columnar Apache Parquet storage engine for point-in-time analytical datasets.
+
+```
++--------------------------------------------------------------------------------------------------+
+|                                  INBOUND RAG INFERENCE PIPELINE                                  |
+|            [Query Text]           [Retrieved Chunks]           [Generated Response]              |
++------------------+------------------------+-----------------------------+------------------------+
+                   |                        |                             |
+                   v                        v                             v
++------------------+------------------------+-----------------------------+------------------------+
+|                                   SPECIALIZED EXTRACTORS                                         |
+|  - QueryFeatureExtractor       - ChunkFeatureExtractor        - ResponseFeatureExtractor         |
+|  - FinancialFeatureExtractor   - EvaluationFeatureExtractor                                      |
++-------------------------------------------+------------------------------------------------------+
+                                            |
+                                            v (FeatureRecord Instances)
++-------------------------------------------+------------------------------------------------------+
+|                         STREAMING FEATURE PIPELINE (Real-Time)                                   |
+|  - Schema Validation via FeatureRegistry                                                         |
+|  - In-Memory Sliding Window Buffering (maxlen=10,000)                                            |
+|  - Real-Time Feature Vector Assembly (OnlineFeatureVector)                                       |
++---------------------+----------------------------------------------------+-----------------------+
+                      |                                                    |
+                      v (Low-Latency Serving)                              v (Batched Flush)
+           +-----------------------+                         +---------------------------+
+           | Online Feature Vector |                         | ParquetFeatureStore       |
+           | O(1) Cache / Lookup   |                         | - Snappy/ZSTD Compression |
+           +-----------------------+                         | - Columnar Partitions     |
+                                                             | - Predicate Pushdown      |
+                                                             +-------------+-------------+
+                                                                           |
+                                            +------------------------------+------------------------------+
+                                            |                                                             |
+                                            v                                                             v
+                             +------------------------------+                              +------------------------------+
+                             |   FEATURE DRIFT DETECTOR     |                              |   FEATURE LIFECYCLE MGMT     |
+                             | - Population Stability Index |                              | - Parquet Compaction         |
+                             | - Kolmogorov-Smirnov Shift   |                              | - TTL Expiration Pruning     |
+                             | - Telemetry Alerts (P2/P1)   |                              | - Point-in-Time Join Export  |
+                             +------------------------------+                              +------------------------------+
+```
+
+### 8.1 Dual-Path Online/Offline Architecture
+
+1. **Online Path (Low Latency)**:
+   - Evaluated queries and contexts immediately yield structured `FeatureRecord` payloads.
+   - Stored in an in-memory sliding circular buffer (`collections.deque`, configurable max size).
+   - Generates unified `OnlineFeatureVector` representations accessible in $<1\text{ ms}$ for guardrail checks or real-time filtering.
+
+2. **Offline Analytical Path (Columnar Parquet)**:
+   - High-throughput streaming batches flush to columnar Apache Parquet files organized by feature group.
+   - Column projection allows reading individual metrics (e.g. `feat_faithfulness_score`) across millions of records without scanning full rows.
+   - Predicate pushdown filtering by `entity_id` and timestamp ranges minimizes disk I/O.
+
+### 8.2 Feature Groups & Schema Definitions
+
+The feature registry (`FeatureRegistry`) manages strict, strongly-typed schemas across five specialized feature groups:
+
+| Feature Group | Target Domain | Core Engineered Features |
+| :--- | :--- | :--- |
+| **`QUERY`** | Inbound User Prompts | `token_length`, `financial_entity_count`, `complexity_score`, `query_type`, `sentiment_polarity` |
+| **`CHUNK`** | Retrieved Context | `token_length`, `numerical_density`, `has_financial_table`, `readability_score` |
+| **`RESPONSE`** | LLM Output | `character_length`, `citation_density`, `hedge_word_ratio`, `numerical_claim_count` |
+| **`EVALUATION`** | Multi-Factor DAG | `faithfulness_score`, `relevance_score`, `context_precision`, `context_recall`, `overall_score` |
+| **`FINANCIAL`** | Financial Telemetry | `ticker`, `fiscal_period`, `monetary_amount_count`, `metric_reference_count`, `risk_level` |
+
+### 8.3 Columnar Storage Layout & PyArrow Mapping
+
+Each partition persists to a strongly-typed Parquet file where schema definitions are dynamically translated to PyArrow types:
+
+- `FeatureValueType.FLOAT` $\rightarrow$ `pa.float64()`
+- `FeatureValueType.INT` $\rightarrow$ `pa.int64()`
+- `FeatureValueType.STRING` $\rightarrow$ `pa.string()`
+- `FeatureValueType.BOOLEAN` $\rightarrow$ `pa.bool_()`
+- `FeatureValueType.VECTOR` $\rightarrow$ `pa.list_(pa.float64())`
+- `FeatureValueType.JSON` $\rightarrow$ `pa.string()`
+
+Metadata columns (`entity_id: string`, `timestamp: float64`, `feature_group: string`) are prepended to ensure reproducible historical replay and point-in-time joins.
+
+### 8.4 Statistical Feature Drift Detection via Population Stability Index (PSI)
+
+To monitor continuous degradation of input embeddings, query patterns, and LLM behavior, the `FeatureDriftDetector` computes the **Population Stability Index (PSI)** between baseline reference distributions and active production windows:
+
+$$PSI = \sum_{b=1}^{B} \left( P_b - Q_b \right) \times \ln\left( \frac{P_b + \epsilon}{Q_b + \epsilon} \right)$$
+
+Where:
+- $B$: Number of empirical quantiles / bins (default $B = 10$).
+- $Q_b$: Proportion of observations from baseline reference distribution falling into bin $b$.
+- $P_b$: Proportion of observations from target production distribution falling into bin $b$.
+- $\epsilon = 10^{-4}$: Regularization constant preventing division by zero or undefined logarithms.
+
+#### Drift Decision Boundaries
+- **$PSI < 0.10$**: **Negligible Shift** — Feature distribution remains stable; normal operation.
+- **$0.10 \le PSI < 0.25$**: **Moderate Shift** — Detectable feature divergence; raises `AlertSeverity.WARNING` telemetry alert.
+- **$PSI \ge 0.25$**: **Significant Shift** — Substantial structural divergence; raises `AlertSeverity.CRITICAL` alert and flags upstream retrieval or model drift.
+
+In addition to PSI, the detector tracks continuous summary delta metrics:
+$$\Delta\mu = \frac{\bar{X}_{\text{target}} - \bar{X}_{\text{baseline}}}{\sigma_{\text{baseline}} + \epsilon}, \quad \Delta\sigma = \frac{s_{\text{target}} - s_{\text{baseline}}}{s_{\text{baseline}} + \epsilon}$$
+
+### 8.5 Compaction, Deduplication & Lifecycle Retention
+
+1. **Storage Compaction**:
+   - Repeated streaming appends produce fragmented Parquet files or bloated row groups.
+   - `FeatureCompactionHandler` consolidates partitioned tables into contiguous, optimally-sized row groups using configurable compression (`snappy`, `zstd`, `gzip`).
+2. **Entity Deduplication**:
+   - Groups records by `entity_id` and retains only the most recent timestamp record, eliminating replay duplicates.
+3. **TTL Retention Pruning**:
+   - Automatically purges historical records older than a configured Time-To-Live threshold ($t_{\text{now}} - t_{\text{record}} > \text{TTL}$), maintaining compliant data governance.
+4. **Point-in-Time Multi-Group Join**:
+   - `FeatureExportHandler` performs multi-group joins aligned by `entity_id` to produce offline training datasets in Parquet, CSV, JSON, or Arrow formats.

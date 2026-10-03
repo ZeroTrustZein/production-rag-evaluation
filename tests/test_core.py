@@ -381,3 +381,170 @@ class TestRAGEvaluatorBatchAndCaching:
         assert summary.total_queries == 0
         assert summary.pass_rate == 0.0
         assert summary.results == []
+
+
+class TestFeatureStoreCoreEngine:
+    """Validate core logic of ParquetFeatureStore, online caching, point-in-time lookup, and stats."""
+
+    def test_online_feature_caching_and_sub_millisecond_retrieval(self, tmp_path) -> None:
+        from production_rag_evaluation.features.models import FeatureGroup, FeatureRecord
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+
+        store = ParquetFeatureStore(base_path=tmp_path / "fs")
+        rec = FeatureRecord(
+            entity_id="entity_99",
+            feature_group=FeatureGroup.QUERY,
+            features={"char_len": 45, "has_ticker": True},
+        )
+        store.put_online_record(rec)
+
+        t0 = time.perf_counter()
+        online_feats = store.get_online_features(entity_ids=["entity_99"])
+        duration_ms = (time.perf_counter() - t0) * 1000.0
+
+        assert "entity_99" in online_feats
+        assert online_feats["entity_99"]["char_len"] == 45
+        assert online_feats["entity_99"]["has_ticker"] is True
+        assert duration_ms < 50.0  # sub-millisecond to sub-few-ms locally
+
+    def test_point_in_time_get_as_of_and_historical_matrix(self, tmp_path) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        from production_rag_evaluation.features.models import FeatureGroup, FeatureRecord
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+
+        store = ParquetFeatureStore(base_path=tmp_path / "fs")
+        t_base = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+        rec_old = FeatureRecord(
+            entity_id="AAPL_Q1",
+            feature_group=FeatureGroup.QUERY,
+            features={"query_word_count": 5},
+            timestamp=t_base - timedelta(hours=2),
+        )
+        rec_new = FeatureRecord(
+            entity_id="AAPL_Q1",
+            feature_group=FeatureGroup.QUERY,
+            features={"query_word_count": 12},
+            timestamp=t_base + timedelta(hours=2),
+        )
+        store.write_records([rec_old, rec_new])
+
+        # As of t_base: should only return rec_old
+        as_of_rec = store.get_as_of("AAPL_Q1", as_of=t_base, group=FeatureGroup.QUERY)
+        assert as_of_rec is not None
+        assert as_of_rec.features["query_word_count"] == 5
+
+        # Historical matrix alignment
+        matrix = store.get_historical_matrix(["AAPL_Q1"], as_of=t_base)
+        assert len(matrix) == 1
+        assert matrix[0]["query__query_word_count"] == 5
+
+    def test_compute_feature_statistics(self, tmp_path) -> None:
+        from production_rag_evaluation.features.models import FeatureGroup, FeatureRecord
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+
+        store = ParquetFeatureStore(base_path=tmp_path / "fs")
+        recs = [
+            FeatureRecord(
+                entity_id=f"e_{i}",
+                feature_group=FeatureGroup.EVALUATION,
+                features={"faithfulness_score": 0.5 + (i * 0.1), "overall_pass": True},
+            )
+            for i in range(5)
+        ]
+        store.write_records(recs)
+
+        stats = store.compute_feature_statistics(FeatureGroup.EVALUATION)
+        assert "faithfulness_score" in stats
+        f_stat = stats["faithfulness_score"]
+        assert f_stat.count == 5
+        assert f_stat.null_count == 0
+        assert f_stat.mean is not None and abs(f_stat.mean - 0.70) < 0.01
+        assert "p50" in f_stat.quantiles
+
+
+class TestStreamingFeaturePipelineCore:
+    """Validate core logic of StreamingFeaturePipeline, deduplication, and sliding window telemetry."""
+
+    def test_pipeline_deduplication(self, tmp_path) -> None:
+        from production_rag_evaluation.features.pipeline import StreamingFeaturePipeline
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+        from production_rag_evaluation.models.schemas import RAGQuery
+
+        pipeline = StreamingFeaturePipeline(
+            store=ParquetFeatureStore(base_path=tmp_path / "fs"),
+            buffer_size=10,
+            auto_flush=False,
+            deduplicate=True,
+        )
+        q = RAGQuery(query_id="dup_query", query_text="Apple revenue 2024", ticker="AAPL")
+        pipeline.ingest(q)
+        assert pipeline.buffer_count == 1
+
+        # Re-ingest same entity ID
+        pipeline.ingest(q)
+        assert pipeline.buffer_count == 1  # Deduplicated, not added twice
+
+    def test_sliding_window_telemetry_and_financial_extraction(self, tmp_path) -> None:
+        from production_rag_evaluation.features.models import FeatureGroup
+        from production_rag_evaluation.features.pipeline import StreamingFeaturePipeline
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+        from production_rag_evaluation.finance.metrics import FinancialRiskEngine
+        from production_rag_evaluation.models.schemas import (
+            EvaluationMetrics,
+            HallucinationFinding,
+            HallucinationType,
+            Severity,
+        )
+
+        pipeline = StreamingFeaturePipeline(
+            store=ParquetFeatureStore(base_path=tmp_path / "fs"),
+            window_size=5,
+            auto_flush=False,
+        )
+
+        for i in range(4):
+            eval_m = EvaluationMetrics(
+                faithfulness_score=0.90 if i > 0 else 0.40,
+                answer_relevance_score=0.90,
+                context_recall_score=0.90,
+                context_precision_score=0.90,
+                citation_grounding_score=0.90,
+                hallucination_rate=0.0 if i > 0 else 0.20,
+                overall_pass=(i > 0),
+                findings=[]
+                if i > 0
+                else [
+                    HallucinationFinding(
+                        finding_type=HallucinationType.NUMERICAL_DISTORTION,
+                        severity=Severity.HIGH,
+                        claim_text="Revenue was $10B",
+                        explanation="Contradicts context",
+                    )
+                ],
+                evaluation_latency_ms=10.0 * (i + 1),
+                metadata={"evaluation_id": f"eval_{i}", "latency_ms": 10.0 * (i + 1)},
+            )
+            pipeline.ingest(eval_m)
+
+        sw_stats = pipeline.get_sliding_window_stats()
+        assert sw_stats.count == 4
+        assert sw_stats.overall_pass_rate == 0.75
+        assert sw_stats.rolling_hallucination_rate == 0.25
+        assert sw_stats.avg_latency_ms == 25.0
+
+        # Ingest financial risk metrics
+        engine = FinancialRiskEngine()
+        returns = np.array([0.01, -0.005, 0.02, 0.015, -0.01])
+        risk_m = engine.compute_all_metrics(returns)
+        fin_rec = pipeline.ingest(risk_m)
+
+        assert fin_rec is not None
+        assert fin_rec.feature_group == FeatureGroup.FINANCIAL
+        assert "sharpe_ratio" in fin_rec.features
+
+        # Pipeline stats check
+        stats = pipeline.stats()
+        assert "sliding_window" in stats
+        assert stats["total_ingested"] == 5
