@@ -17,6 +17,7 @@ from production_rag_evaluation.features.models import (
     ExportFormat,
     FeatureGroup,
     FeatureRecord,
+    ensure_utc,
 )
 from production_rag_evaluation.features.pipeline import StreamingFeaturePipeline
 from production_rag_evaluation.features.store import ParquetFeatureStore
@@ -169,12 +170,7 @@ class FeatureCompactionHandler:
             now_utc = datetime.now(timezone.utc)
             surviving: List[FeatureRecord] = []
             for r in records:
-                r_ts = (
-                    r.timestamp
-                    if r.timestamp.tzinfo is not None
-                    else r.timestamp.replace(tzinfo=timezone.utc)
-                )
-                age = (now_utc - r_ts).total_seconds()
+                age = (now_utc - ensure_utc(r.timestamp)).total_seconds()
                 if age <= ttl_seconds:
                     surviving.append(r)
                 else:
@@ -182,27 +178,8 @@ class FeatureCompactionHandler:
             records = surviving
 
         # Rewrite clean compacted parquet file
-        if records:
-            rows: List[Dict[str, Any]] = []
-            for r in records:
-                row_data: Dict[str, Any] = {
-                    "entity_id": r.entity_id,
-                    "feature_group": r.feature_group.value,
-                    "timestamp": r.timestamp.isoformat(),
-                    "metadata": json.dumps(r.metadata),
-                }
-                for f_name, f_val in r.features.items():
-                    row_data[f"feat_{f_name}"] = f_val
-                rows.append(row_data)
-
-            table = pa.Table.from_pylist(rows)
-            pq.write_table(table, file_path, compression=compression)
-            bytes_after = file_path.stat().st_size
-        else:
-            # All expired or zero records
-            if file_path.exists():
-                file_path.unlink()
-            bytes_after = 0
+        self.store.overwrite_records(group=group, records=records, compression=compression)
+        bytes_after = file_path.stat().st_size if file_path.exists() else 0
 
         # Refresh online cache for surviving records
         for r in records:
@@ -237,9 +214,7 @@ class FeatureCompactionHandler:
     def prune_expired_records(self, group: FeatureGroup, older_than: datetime) -> int:
         """Purge records strictly older than the specified timestamp."""
         now_utc = datetime.now(timezone.utc)
-        target_utc = (
-            older_than if older_than.tzinfo is not None else older_than.replace(tzinfo=timezone.utc)
-        )
+        target_utc = ensure_utc(older_than)
         ttl = max(0.0, (now_utc - target_utc).total_seconds())
         res = self.compact_group(group=group, ttl_seconds=ttl)
         return res.expired_records_pruned

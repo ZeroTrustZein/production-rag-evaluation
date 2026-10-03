@@ -48,6 +48,7 @@ class ParquetFeatureStore:
         """Retrieve latest feature vectors for a list of entity IDs with sub-millisecond latency."""
         results: Dict[str, Dict[str, Any]] = {}
         groups_to_check = [group] if group is not None else list(FeatureGroup)
+        req_features = set(feature_names) if feature_names is not None else None
 
         for eid in entity_ids:
             merged: Dict[str, Any] = {}
@@ -61,10 +62,66 @@ class ParquetFeatureStore:
                         self.put_online_record(rec)
                 if rec is not None:
                     for k, v in rec.features.items():
-                        if feature_names is None or k in feature_names:
+                        if req_features is None or k in req_features:
                             merged[k] = v
             results[eid] = merged
         return results
+
+    @staticmethod
+    def _records_to_table(records: List[FeatureRecord]) -> pa.Table:
+        rows: List[Dict[str, Any]] = []
+        for r in records:
+            row_data: Dict[str, Any] = {
+                "entity_id": r.entity_id,
+                "feature_group": r.feature_group.value,
+                "timestamp": r.timestamp.isoformat(),
+                "metadata": json.dumps(r.metadata),
+            }
+            for f_name, f_val in r.features.items():
+                row_data[f"feat_{f_name}"] = f_val
+            rows.append(row_data)
+        return pa.Table.from_pylist(rows)
+
+    @staticmethod
+    def _row_to_record(row: Dict[str, Any], columns: Optional[List[str]] = None) -> FeatureRecord:
+        features: Dict[str, Any] = {}
+        col_set = set(columns) if columns is not None else None
+        for k, v in row.items():
+            if k.startswith("feat_"):
+                feat_name = k[5:]
+                if col_set is None or feat_name in col_set:
+                    features[feat_name] = v
+
+        meta_str = row.get("metadata", "{}")
+        try:
+            meta = json.loads(meta_str) if isinstance(meta_str, str) else {}
+        except Exception:
+            meta = {}
+
+        ts = ensure_utc(row.get("timestamp"))
+
+        return FeatureRecord(
+            entity_id=row["entity_id"],
+            feature_group=FeatureGroup(row["feature_group"]),
+            features=features,
+            timestamp=ts,
+            metadata=meta,
+        )
+
+    def overwrite_records(
+        self,
+        group: FeatureGroup,
+        records: List[FeatureRecord],
+        compression: str = "snappy",
+    ) -> None:
+        """Overwrite a feature group partition with compacted or pruned records."""
+        file_path = self._get_parquet_path(group)
+        if not records:
+            if file_path.exists():
+                file_path.unlink()
+            return
+        table = self._records_to_table(records)
+        pq.write_table(table, file_path, compression=compression)
 
     def write_records(
         self,
@@ -87,21 +144,7 @@ class ParquetFeatureStore:
         written_count = 0
         for group, recs in grouped.items():
             file_path = self._get_parquet_path(group)
-
-            # Build row dicts
-            rows: List[Dict[str, Any]] = []
-            for r in recs:
-                row_data: Dict[str, Any] = {
-                    "entity_id": r.entity_id,
-                    "feature_group": r.feature_group.value,
-                    "timestamp": r.timestamp.isoformat(),
-                    "metadata": json.dumps(r.metadata),
-                }
-                for f_name, f_val in r.features.items():
-                    row_data[f"feat_{f_name}"] = f_val
-                rows.append(row_data)
-
-            new_table = pa.Table.from_pylist(rows)
+            new_table = self._records_to_table(recs)
 
             if file_path.exists():
                 existing_table = pq.read_table(file_path)
@@ -135,39 +178,7 @@ class ParquetFeatureStore:
         for row in data:
             if entity_id is not None and row.get("entity_id") != entity_id:
                 continue
-
-            features: Dict[str, Any] = {}
-            for k, v in row.items():
-                if k.startswith("feat_"):
-                    feat_name = k[5:]
-                    if columns is None or feat_name in columns:
-                        features[feat_name] = v
-
-            meta_str = row.get("metadata", "{}")
-            try:
-                meta = json.loads(meta_str) if isinstance(meta_str, str) else {}
-            except Exception:
-                meta = {}
-
-            ts_raw = row.get("timestamp")
-            if isinstance(ts_raw, str):
-                try:
-                    ts = datetime.fromisoformat(ts_raw)
-                except Exception:
-                    ts = datetime.now(timezone.utc)
-            elif isinstance(ts_raw, datetime):
-                ts = ts_raw
-            else:
-                ts = datetime.now(timezone.utc)
-
-            rec = FeatureRecord(
-                entity_id=row["entity_id"],
-                feature_group=FeatureGroup(row["feature_group"]),
-                features=features,
-                timestamp=ts,
-                metadata=meta,
-            )
-            records.append(rec)
+            records.append(self._row_to_record(row, columns=columns))
             if limit is not None and len(records) >= limit:
                 break
 
@@ -215,36 +226,25 @@ class ParquetFeatureStore:
         group: Optional[FeatureGroup] = None,
     ) -> Optional[FeatureRecord]:
         """Retrieve the latest observation for an entity recorded on or before the given timestamp."""
-        as_of_utc = as_of if as_of.tzinfo is not None else as_of.replace(tzinfo=timezone.utc)
+        as_of_utc = ensure_utc(as_of)
         groups_to_check = [group] if group is not None else list(FeatureGroup)
 
         candidates: List[FeatureRecord] = []
         for grp in groups_to_check:
             # Check online cache first
             cached = self._online_cache.get((grp, entity_id))
-            if cached is not None:
-                c_ts = (
-                    cached.timestamp
-                    if cached.timestamp.tzinfo is not None
-                    else cached.timestamp.replace(tzinfo=timezone.utc)
-                )
-                if c_ts <= as_of_utc:
-                    candidates.append(cached)
+            if cached is not None and ensure_utc(cached.timestamp) <= as_of_utc:
+                candidates.append(cached)
 
             recs = self.read_records(group=grp, entity_id=entity_id)
             for r in recs:
-                r_ts = (
-                    r.timestamp
-                    if r.timestamp.tzinfo is not None
-                    else r.timestamp.replace(tzinfo=timezone.utc)
-                )
-                if r_ts <= as_of_utc:
+                if ensure_utc(r.timestamp) <= as_of_utc:
                     candidates.append(r)
 
         if not candidates:
             return None
 
-        candidates.sort(key=lambda r: r.timestamp)
+        candidates.sort(key=lambda r: ensure_utc(r.timestamp))
         return candidates[-1]
 
     def get_historical_matrix(
@@ -310,10 +310,11 @@ class ParquetFeatureStore:
                 std_val = float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0
                 min_val = float(np.min(arr))
                 max_val = float(np.max(arr))
+                p25, p50, p75 = np.percentile(arr, [25, 50, 75])
                 quantiles = {
-                    "p25": float(np.percentile(arr, 25)),
-                    "p50": float(np.percentile(arr, 50)),
-                    "p75": float(np.percentile(arr, 75)),
+                    "p25": float(p25),
+                    "p50": float(p50),
+                    "p75": float(p75),
                 }
                 stats[feat_name] = FeatureStatistics(
                     feature_name=feat_name,
