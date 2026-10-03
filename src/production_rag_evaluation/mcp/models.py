@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -254,3 +255,38 @@ class JSONRPCResponse(BaseModel):
     id: Optional[Union[str, int]] = Field(default=None)
     result: Optional[Any] = Field(default=None)
     error: Optional[JSONRPCError] = Field(default=None)
+
+
+class MCPSession(BaseModel):
+    """Active client connection session metadata."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    session_id: str = Field(description="Unique session identifier")
+    client_info: Dict[str, Any] = Field(
+        default_factory=dict, description="Metadata provided by client during initialization"
+    )
+    protocol_version: str = Field(
+        default=MCP_PROTOCOL_VERSION, description="Negotiated protocol specification version"
+    )
+    is_authenticated: bool = Field(default=True, description="Whether session is authenticated")
+    created_at: float = Field(default_factory=lambda: time.time(), description="Epoch timestamp of creation")
+    last_active_at: float = Field(
+        default_factory=lambda: time.time(), description="Epoch timestamp of last interaction"
+    )
+    request_count: int = Field(default=0, description="Total requests processed in this session")
+
+
+class ToolExecutionStats(BaseModel):
+    """Execution metrics and latency statistics for an MCP tool."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tool_name: str = Field(description="Unique tool identifier")
+    call_count: int = Field(default=0, description="Total invocation count")
+    error_count: int = Field(default=0, description="Failed invocation count")
+    total_latency_ms: float = Field(default=0.0, description="Cumulative latency in milliseconds")
+    mean_latency_ms: float = Field(default=0.0, description="Average latency in milliseconds")
+    last_executed_at: Optional[float] = Field(
+        default=None, description="Epoch timestamp of last invocation"
+    )

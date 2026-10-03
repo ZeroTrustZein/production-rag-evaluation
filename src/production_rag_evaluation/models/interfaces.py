@@ -414,3 +414,41 @@ class MCPPromptRegistryProtocol(Protocol):
     def render(self, name: str, arguments: Dict[str, str]) -> Dict[str, Any]:
         """Render prompt arguments into MCP messages response."""
         ...
+
+
+@runtime_checkable
+class MCPIntegrationHandlerProtocol(Protocol):
+    """Contract for MCP integration pipeline with telemetry and storage."""
+
+    def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+        """Execute tool with telemetry tracking."""
+        ...
+
+    def dispatch_jsonrpc(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Dispatch JSON-RPC request with telemetry tracking."""
+        ...
+
+    def get_execution_stats(self) -> Dict[str, Any]:
+        """Return aggregate execution telemetry."""
+        ...
+
+
+@runtime_checkable
+class MCPSessionHandlerProtocol(Protocol):
+    """Contract for MCP client session state and authentication."""
+
+    def create_session(
+        self,
+        client_info: Optional[Dict[str, Any]] = None,
+        auth_token: Optional[str] = None,
+    ) -> Any:
+        """Create and track an active client session."""
+        ...
+
+    def validate_session(self, session_id: str) -> bool:
+        """Verify whether session exists and is active."""
+        ...
+
+    def close_session(self, session_id: str) -> bool:
+        """Terminate an active session."""
+        ...
