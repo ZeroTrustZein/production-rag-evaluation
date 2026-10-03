@@ -86,7 +86,7 @@ def _provide_features_schema() -> str:
     registry = get_default_registry()
     catalog: Dict[str, List[Dict[str, Any]]] = {}
     for d in registry.list_definitions():
-        group_key = d.group.value
+        group_key = d.feature_group.value
         catalog.setdefault(group_key, []).append(
             {
                 "name": d.name,

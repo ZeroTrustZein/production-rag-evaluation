@@ -168,7 +168,7 @@ def handle_rag_evaluate(
             targets.append(
                 NumericalTarget(
                     metric_name=t.get("metric_name", "target"),
-                    expected_value=float(t.get("expected_value", 0.0)),
+                    target_value=float(t.get("target_value", t.get("expected_value", 0.0))),
                     unit=t.get("unit"),
                     tolerance_pct=float(t.get("tolerance_pct", 0.01)),
                 )
@@ -178,7 +178,7 @@ def handle_rag_evaluate(
         query_id="mcp-eval-q",
         query_text=query_text,
         ticker=active_ticker,
-        numerical_targets=targets,
+        structured_targets=targets,
     )
 
     citations: List[Citation] = []
@@ -242,13 +242,13 @@ def handle_rag_detect_hallucinations(
     ungrounded = detector.detect_ungrounded_claims(generated_answer, chunks)
 
     return {
-        "has_hallucinations": bool(distortions or contradictions or any(not u.is_grounded for u in ungrounded)),
+        "has_hallucinations": bool(distortions or contradictions or ungrounded),
         "numerical_distortions": [
             {
                 "claim": f.claim_text,
                 "severity": f.severity.value,
                 "confidence": round(f.confidence, 4),
-                "source_evidence": f.source_evidence,
+                "source_evidence": f.reference_text,
             }
             for f in distortions
         ],
@@ -257,19 +257,18 @@ def handle_rag_detect_hallucinations(
                 "claim": f.claim_text,
                 "severity": f.severity.value,
                 "confidence": round(f.confidence, 4),
-                "source_evidence": f.source_evidence,
+                "source_evidence": f.reference_text,
             }
             for f in contradictions
         ],
         "ungrounded_claims": [
             {
                 "claim": u.claim_text,
-                "is_grounded": u.is_grounded,
-                "confidence": round(u.confidence_score, 4),
-                "contradiction": u.is_contradiction,
+                "severity": u.severity.value,
+                "confidence": round(u.confidence, 4),
+                "explanation": u.explanation,
             }
             for u in ungrounded
-            if not u.is_grounded
         ],
         "total_claims_checked": len(ungrounded),
     }
@@ -358,7 +357,8 @@ def handle_rag_feature_stats(
 
     group_filter = feature_group.upper()
     if group_filter != "ALL" and hasattr(FeatureGroup, group_filter):
-        definitions = [d for d in definitions if d.group.value == group_filter]
+        target_group = FeatureGroup(group_filter)
+        definitions = [d for d in definitions if d.feature_group == target_group]
 
     store = ParquetFeatureStore(base_path=store_path) if store_path else ParquetFeatureStore()
     summary = store.storage_summary()
@@ -368,7 +368,7 @@ def handle_rag_feature_stats(
         "feature_definitions": [
             {
                 "name": d.name,
-                "group": d.group.value,
+                "group": d.feature_group.value,
                 "value_type": d.value_type.value,
                 "description": d.description,
             }
