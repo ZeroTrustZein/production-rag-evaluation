@@ -21,11 +21,43 @@ from production_rag_evaluation.features.store import ParquetFeatureStore
 from production_rag_evaluation.finance.metrics import FinancialRiskEngine
 from production_rag_evaluation.finance.stress_testing import MonteCarloStressTester
 from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
+from production_rag_evaluation.mcp.models import (
+    JSONRPCError,
+    JSONRPCRequest,
+    JSONRPCResponse,
+    MCPConfig,
+    MCPPrompt,
+    MCPPromptArgument,
+    MCPPromptMessage,
+    MCPProtocolVersion,
+    MCPResource,
+    MCPTool,
+    MCPTransport,
+    ToolCallResult,
+    ToolParameter,
+)
+from production_rag_evaluation.mcp.prompts import (
+    get_default_prompt_registry,
+)
+from production_rag_evaluation.mcp.resources import (
+    get_default_resource_registry,
+)
+from production_rag_evaluation.mcp.server import (
+    MCPServer,
+    create_mcp_server,
+)
+from production_rag_evaluation.mcp.tools import (
+    get_default_tool_registry,
+)
 from production_rag_evaluation.models.interfaces import (
     EvaluatorProtocol,
     FeatureStoreProtocol,
     FinancialRiskEngineProtocol,
     HallucinationDetectorProtocol,
+    MCPPromptRegistryProtocol,
+    MCPResourceRegistryProtocol,
+    MCPServerProtocol,
+    MCPToolRegistryProtocol,
     MonteCarloStressTesterProtocol,
     RiskTelemetryCollectorProtocol,
     SemanticCacheProtocol,
@@ -425,6 +457,22 @@ class TestProtocolConformity:
         drift = FeatureDriftDetector(store=store)
         assert isinstance(drift, FeatureDriftDetectorProtocol)
 
+    def test_mcp_protocols_conformity(self) -> None:
+        server = MCPServer()
+        assert isinstance(server, MCPServerProtocol)
+
+        server_created = create_mcp_server()
+        assert isinstance(server_created, MCPServerProtocol)
+
+        tools = get_default_tool_registry()
+        assert isinstance(tools, MCPToolRegistryProtocol)
+
+        resources = get_default_resource_registry()
+        assert isinstance(resources, MCPResourceRegistryProtocol)
+
+        prompts = get_default_prompt_registry()
+        assert isinstance(prompts, MCPPromptRegistryProtocol)
+
 
 class TestFeatureStoreModels:
     """Validate Feature Definition, Schema, Statistics, and Streaming Batch models."""
@@ -468,3 +516,123 @@ class TestFeatureStoreModels:
         )
         assert vec.entity_id == "e1"
         assert vec.features["char_len"] == 42
+
+    def test_feature_registry_list_definitions(self) -> None:
+        from production_rag_evaluation.features.registry import get_default_registry
+
+        registry = get_default_registry()
+        defs = registry.list_definitions()
+        assert len(defs) > 0
+        assert all(isinstance(d, FeatureDefinition) for d in defs)
+
+        query_defs = registry.list_definitions(FeatureGroup.QUERY)
+        assert len(query_defs) > 0
+        assert all(d.feature_group == FeatureGroup.QUERY for d in query_defs)
+
+
+class TestMCPModels:
+    """Validate Model Context Protocol schemas, messages, and configurations."""
+
+    def test_mcp_enums(self) -> None:
+        assert MCPProtocolVersion.V2024_11_05.value == "2024-11-05"
+        transports = {t.value for t in MCPTransport}
+        assert {"stdio", "sse", "http"}.issubset(transports)
+
+    def test_mcp_config(self) -> None:
+        cfg = MCPConfig()
+        assert cfg.server_name == "production-rag-evaluation-mcp"
+        assert cfg.transport == MCPTransport.STDIO
+        assert cfg.port == 8000
+
+        with pytest.raises(ValidationError):
+            setattr(cfg, "port", 9000)  # frozen model
+
+        custom = MCPConfig(
+            server_name="custom-mcp",
+            transport=MCPTransport.SSE,
+            host="0.0.0.0",
+            port=9090,
+            auth_token="secret",
+        )
+        assert custom.server_name == "custom-mcp"
+        assert custom.transport == MCPTransport.SSE
+        assert custom.port == 9090
+
+    def test_mcp_tool_model(self) -> None:
+        tool = MCPTool(
+            name="rag_eval",
+            description="Evaluate RAG",
+            parameters=[
+                ToolParameter(
+                    name="query",
+                    type="string",
+                    description="Query text",
+                    required=True,
+                )
+            ],
+            handler=lambda args: ToolCallResult.text("ok"),
+        )
+        assert tool.name == "rag_eval"
+        assert "query" in tool.inputSchema["properties"]
+        assert tool.inputSchema["required"] == ["query"]
+
+        assert tool.handler is not None
+        res = tool.handler({"query": "test"})
+        assert res.isError is False
+        assert res.content[0]["text"] == "ok"
+
+    def test_mcp_resource_model(self) -> None:
+        res = MCPResource(
+            uri="rag://health",
+            name="health",
+            description="Health status",
+            mimeType="application/json",
+            text='{"status": "ok"}',
+        )
+        assert res.uri == "rag://health"
+        assert res.mimeType == "application/json"
+        assert res.text == '{"status": "ok"}'
+
+    def test_mcp_prompt_models(self) -> None:
+        arg = MCPPromptArgument(
+            name="ticker",
+            description="Ticker symbol",
+            required=True,
+        )
+        assert arg.name == "ticker"
+        assert arg.required is True
+
+        msg = MCPPromptMessage(
+            role="user",
+            content="Audit ticker {ticker}",
+        )
+        assert msg.role == "user"
+
+        prompt = MCPPrompt(
+            name="audit_template",
+            description="Template for audit",
+            arguments=[arg],
+            template="Audit ticker {ticker}",
+        )
+        assert prompt.name == "audit_template"
+        assert len(prompt.arguments) == 1
+
+    def test_jsonrpc_models(self) -> None:
+        req = JSONRPCRequest(
+            id=1,
+            method="tools/call",
+            params={"name": "rag_eval", "arguments": {}},
+        )
+        assert req.jsonrpc == "2.0"
+        assert req.id == 1
+
+        err = JSONRPCError(code=-32601, message="Method not found")
+        assert err.code == -32601
+
+        resp = JSONRPCResponse(id=1, result={"ok": True})
+        assert resp.result == {"ok": True}
+        assert resp.error is None
+
+        err_resp = JSONRPCResponse(id=1, error=err)
+        assert err_resp.error is not None
+        assert err_resp.error.code == -32601
