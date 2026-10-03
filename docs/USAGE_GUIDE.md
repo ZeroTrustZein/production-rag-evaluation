@@ -280,6 +280,87 @@ rag-eval cache clear
 
 ---
 
+### 2.8 Feature Store Management (`feature-store` / `features`)
+
+The feature store command group inspects, manages, compacts, and exports columnar Parquet partitions and audits statistical feature drift.
+
+#### 1. Inspect Feature Store Storage Metrics (`stats`)
+```bash
+rag-eval feature-store stats --path ./data/feature_store
+```
+Displays a Rich table of feature groups (`QUERY`, `CHUNK`, `RESPONSE`, `EVALUATION`, `FINANCIAL`), row counts, column counts, row group counts, and physical byte sizes. Add `--json-out` for automated observability pipelines.
+
+#### 2. List Registered Feature Schemas (`list-schemas`)
+```bash
+# View all schemas
+rag-eval feature-store list-schemas
+
+# Filter to a specific group
+rag-eval feature-store list-schemas --group EVALUATION
+```
+Displays registered features, types (`FLOAT`, `INT`, `STRING`, `BOOLEAN`, `VECTOR`, `JSON`), nullability, and field descriptions.
+
+#### 3. Compact Parquet Partitions & Enforce TTL (`compact`)
+```bash
+# Compact all groups, deduplicate entity IDs, and prune records older than 30 days (2,592,000s)
+rag-eval feature-store compact \
+  --path ./data/feature_store \
+  --ttl 2592000 \
+  --compression snappy
+
+# Compact specific feature group
+rag-eval feature-store compact \
+  --path ./data/feature_store \
+  --group RESPONSE \
+  --compression zstd
+```
+
+#### 4. Export Aligned Point-in-Time Dataset (`export`)
+```bash
+# Export from comma-separated entity IDs
+rag-eval feature-store export \
+  --path ./data/feature_store \
+  --entities "entity_001,entity_002,entity_003" \
+  --output ./exports/rag_training_set.parquet \
+  --format PARQUET
+
+# Export from an entity list file
+rag-eval feature-store export \
+  --path ./data/feature_store \
+  --entities ./entity_ids.txt \
+  --output ./exports/rag_training_set.csv \
+  --format CSV \
+  --group EVALUATION \
+  --group FINANCIAL
+```
+
+#### 5. Audit Statistical Feature Drift via PSI (`drift`)
+```bash
+# Audit drift across all groups and features against baseline
+rag-eval feature-store drift \
+  --path ./data/feature_store \
+  --psi-threshold 0.25
+
+# Audit specific feature and group with JSON output
+rag-eval feature-store drift \
+  --path ./data/feature_store \
+  --group EVALUATION \
+  --feature faithfulness_score \
+  --json-out
+```
+
+#### 6. Streaming into Feature Store from Evaluator CLI
+The `evaluate` and `batch-evaluate` commands support `--feature-store-path` to stream extracted feature records directly into the columnar store in real time:
+```bash
+rag-eval evaluate \
+  -q "What were Apple's net sales in 2024?" \
+  -a "Apple reported net sales of $391.0 billion." \
+  -c "For fiscal year 2024, Apple reported net sales of $391.0 billion." \
+  --feature-store-path ./data/feature_store
+```
+
+---
+
 ## 3. Python API Workflows & Recipes
 
 ### Workflow 1: End-to-End SEC 10-K RAG Evaluation
@@ -454,4 +535,139 @@ drift_result = collector.detect_drift(
 
 if drift_result.get("drift_detected"):
     print(f"WARNING: Statistically significant drift detected! p-value: {drift_result['p_value']}")
+```
+
+---
+
+### Workflow 5: Streaming Feature Ingestion & Online Feature Vector Retrieval
+
+```python
+from production_rag_evaluation import RAGEvaluator, RAGQuery, RAGResponse, DocumentChunk
+from production_rag_evaluation.features import (
+    ParquetFeatureStore,
+    StreamingFeaturePipeline,
+    EvaluationFeatureHandler,
+)
+
+# 1. Initialize store and streaming pipeline
+store = ParquetFeatureStore(base_path="./data/feature_store")
+pipeline = StreamingFeaturePipeline(store=store, batch_size=50)
+handler = EvaluationFeatureHandler(pipeline=pipeline)
+
+# 2. Evaluate RAG interaction
+evaluator = RAGEvaluator()
+query = "What was Tesla's automotive gross margin?"
+response = "Tesla reported automotive gross margin of 18.2% excluding regulatory credits."
+chunk = "Automotive gross margin was 18.2% in the quarter."
+
+metrics = evaluator.evaluate(
+    query=RAGQuery(text=query, ticker="TSLA"),
+    response=RAGResponse(text=response),
+    context_chunks=[DocumentChunk(chunk_id="chunk-1", text=chunk)],
+)
+
+# 3. Stream features directly through integration handler
+vector = handler.on_evaluation_completed(
+    metrics=metrics,
+    query=query,
+    answer=response,
+    context=chunk,
+    ticker="TSLA",
+    period="Q3-2024",
+)
+
+# 4. Immediate online serving (<1ms lookup)
+print(f"Entity ID: {vector.entity_id}")
+print(f"Extracted features count: {len(vector.features)}")
+print(f"Faithfulness feature: {vector.features.get('faithfulness_score')}")
+
+# Explicit flush to columnar Parquet
+flushed_count = pipeline.flush()
+print(f"Flushed {flushed_count} records to Parquet.")
+```
+
+---
+
+### Workflow 6: Population Stability Index (PSI) Drift Detection & Telemetry Alerts
+
+```python
+from production_rag_evaluation import RiskTelemetryCollector
+from production_rag_evaluation.features import (
+    ParquetFeatureStore,
+    FeatureDriftDetector,
+    FeatureGroup,
+)
+
+store = ParquetFeatureStore(base_path="./data/feature_store")
+detector = FeatureDriftDetector(store=store)
+collector = RiskTelemetryCollector()
+
+# Run PSI drift detection across all stored features
+reports = detector.detect_all_drift(group=FeatureGroup.EVALUATION, psi_threshold=0.25)
+
+for report in reports:
+    status = "DRIFT DETECTED" if report.drift_detected else "STABLE"
+    print(f"[{status}] Feature: {report.feature_name} | PSI: {report.psi_score:.4f} (Threshold: {report.threshold})")
+
+# Generate telemetry alerts and register with RiskTelemetryCollector
+alerts = detector.generate_telemetry_alerts(collector=collector, reports=reports)
+for alert in alerts:
+    print(f"Alert Dispatched: [{alert.severity.value}] {alert.message}")
+```
+
+---
+
+### Workflow 7: Partition Compaction, Deduplication & TTL Retention
+
+```python
+from production_rag_evaluation.features import (
+    ParquetFeatureStore,
+    FeatureCompactionHandler,
+    FeatureGroup,
+)
+
+store = ParquetFeatureStore(base_path="./data/feature_store")
+compactor = FeatureCompactionHandler(store=store)
+
+# Compact response features: deduplicate entity IDs and prune records older than 14 days
+result = compactor.compact_group(
+    group=FeatureGroup.RESPONSE,
+    ttl_seconds=14 * 86400,
+    compression="snappy",
+)
+
+print(f"Group: {result.feature_group.value}")
+print(f"Original Records: {result.original_records}")
+print(f"Retained Records: {result.retained_records}")
+print(f"Purged / Deduplicated: {result.purged_records}")
+print(f"Compacted File Size: {result.file_size_bytes:,} bytes")
+```
+
+---
+
+### Workflow 8: Offline Multi-Group Training Matrix Export
+
+```python
+from production_rag_evaluation.features import (
+    ParquetFeatureStore,
+    FeatureExportHandler,
+    FeatureGroup,
+    ExportFormat,
+)
+
+store = ParquetFeatureStore(base_path="./data/feature_store")
+exporter = FeatureExportHandler(store=store)
+
+# Discover entities to export
+entity_ids = store.list_entities(FeatureGroup.EVALUATION, limit=500)
+
+# Export point-in-time merged matrix across EVALUATION, FINANCIAL, and QUERY groups
+dataset_path = exporter.export_dataset(
+    entity_ids=entity_ids,
+    output_path="./exports/rag_eval_training.parquet",
+    format=ExportFormat.PARQUET,
+    groups=[FeatureGroup.EVALUATION, FeatureGroup.FINANCIAL, FeatureGroup.QUERY],
+)
+
+print(f"Exported training dataset to: {dataset_path}")
 ```
