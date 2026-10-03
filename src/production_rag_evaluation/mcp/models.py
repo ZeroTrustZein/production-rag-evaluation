@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 JSONRPC_VERSION: str = "2.0"
 MCP_PROTOCOL_VERSION: str = "2024-11-05"
@@ -83,6 +83,10 @@ class MCPTool(BaseModel):
 
     name: str = Field(description="Unique tool identifier")
     description: str = Field(description="Behavioral synopsis provided to client LLMs")
+    parameters: Optional[List[ToolParameter]] = Field(
+        default=None,
+        description="Optional list of typed tool parameters used to construct inputSchema",
+    )
     inputSchema: Dict[str, Any] = Field(
         default_factory=lambda: {"type": "object", "properties": {}, "required": []},
         description="JSON Schema specifying acceptable arguments",
@@ -91,6 +95,42 @@ class MCPTool(BaseModel):
         default=None,
         description="Optional underlying callable handling execution",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _construct_input_schema(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            params = data.get("parameters")
+            if params and ("inputSchema" not in data or not data["inputSchema"].get("properties")):
+                properties: Dict[str, Any] = {}
+                required: List[str] = []
+                for p in params:
+                    if isinstance(p, ToolParameter):
+                        p_name = p.name
+                        p_type = p.type
+                        p_desc = p.description
+                        p_req = p.required
+                    elif isinstance(p, dict):
+                        p_name = p.get("name", "")
+                        p_type = p.get("type", "string")
+                        p_desc = p.get("description", "")
+                        p_req = p.get("required", True)
+                    else:
+                        continue
+                    prop_def: Dict[str, Any] = {"type": p_type}
+                    if p_desc:
+                        prop_def["description"] = p_desc
+                    properties[p_name] = prop_def
+                    if p_req:
+                        required.append(p_name)
+                schema = data.get("inputSchema", {})
+                data["inputSchema"] = {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                    **{k: v for k, v in schema.items() if k not in ("properties", "required", "type")},
+                }
+        return data
 
 
 class ToolCallResult(BaseModel):
