@@ -45,6 +45,11 @@ from production_rag_evaluation.features.store import ParquetFeatureStore
 from production_rag_evaluation.finance.metrics import FinancialRiskEngine
 from production_rag_evaluation.finance.stress_testing import MonteCarloStressTester
 from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
+from production_rag_evaluation.mcp.handlers import (
+    MCPIntegrationHandler,
+    MCPNotificationDispatcher,
+    MCPSessionHandler,
+)
 from production_rag_evaluation.mcp.models import (
     JSONRPCError,
     JSONRPCRequest,
@@ -55,9 +60,11 @@ from production_rag_evaluation.mcp.models import (
     MCPPromptMessage,
     MCPProtocolVersion,
     MCPResource,
+    MCPSession,
     MCPTool,
     MCPTransport,
     ToolCallResult,
+    ToolExecutionStats,
     ToolParameter,
 )
 from production_rag_evaluation.mcp.prompts import (
@@ -85,9 +92,11 @@ from production_rag_evaluation.models.interfaces import (
     FeatureStoreProtocol,
     FinancialRiskEngineProtocol,
     HallucinationDetectorProtocol,
+    MCPIntegrationHandlerProtocol,
     MCPPromptRegistryProtocol,
     MCPResourceRegistryProtocol,
     MCPServerProtocol,
+    MCPSessionHandlerProtocol,
     MCPToolRegistryProtocol,
     MonteCarloStressTesterProtocol,
     RiskTelemetryCollectorProtocol,
@@ -206,6 +215,11 @@ __all__ = [
     "JSONRPCRequest",
     "JSONRPCResponse",
     "JSONRPCError",
+    "MCPSessionHandler",
+    "MCPSession",
+    "MCPIntegrationHandler",
+    "MCPNotificationDispatcher",
+    "ToolExecutionStats",
     # Protocols
     "EvaluationFeatureHandlerProtocol",
     "EvaluatorProtocol",
@@ -216,6 +230,8 @@ __all__ = [
     "FinancialRiskEngineProtocol",
     "HallucinationDetectorProtocol",
     "MCPServerProtocol",
+    "MCPIntegrationHandlerProtocol",
+    "MCPSessionHandlerProtocol",
     "MCPPromptRegistryProtocol",
     "MCPResourceRegistryProtocol",
     "MCPToolRegistryProtocol",

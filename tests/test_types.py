@@ -31,9 +31,11 @@ from production_rag_evaluation.mcp.models import (
     MCPPromptMessage,
     MCPProtocolVersion,
     MCPResource,
+    MCPSession,
     MCPTool,
     MCPTransport,
     ToolCallResult,
+    ToolExecutionStats,
     ToolParameter,
 )
 from production_rag_evaluation.mcp.prompts import (
@@ -473,6 +475,21 @@ class TestProtocolConformity:
         prompts = get_default_prompt_registry()
         assert isinstance(prompts, MCPPromptRegistryProtocol)
 
+        from production_rag_evaluation.mcp.handlers import (
+            MCPIntegrationHandler,
+            MCPSessionHandler,
+        )
+        from production_rag_evaluation.models.interfaces import (
+            MCPIntegrationHandlerProtocol,
+            MCPSessionHandlerProtocol,
+        )
+
+        session_mgr = MCPSessionHandler()
+        assert isinstance(session_mgr, MCPSessionHandlerProtocol)
+
+        integ = MCPIntegrationHandler()
+        assert isinstance(integ, MCPIntegrationHandlerProtocol)
+
 
 class TestFeatureStoreModels:
     """Validate Feature Definition, Schema, Statistics, and Streaming Batch models."""
@@ -636,3 +653,19 @@ class TestMCPModels:
         err_resp = JSONRPCResponse(id=1, error=err)
         assert err_resp.error is not None
         assert err_resp.error.code == -32601
+
+        session = MCPSession(session_id="sess-1")
+        assert session.session_id == "sess-1"
+        assert session.is_authenticated is True
+        assert session.request_count == 0
+
+        stats = ToolExecutionStats(
+            tool_name="rag_evaluate",
+            call_count=10,
+            error_count=1,
+            total_latency_ms=150.0,
+            mean_latency_ms=15.0,
+        )
+        assert stats.tool_name == "rag_evaluate"
+        assert stats.call_count == 10
+        assert stats.mean_latency_ms == 15.0

@@ -39,7 +39,17 @@ class MCPServer:
         self.tool_registry = tool_registry or get_default_tool_registry()
         self.resource_registry = resource_registry or get_default_resource_registry()
         self.prompt_registry = prompt_registry or get_default_prompt_registry()
+        self._session_handler: Optional[Any] = None
         self._is_initialized = False
+
+    @property
+    def session_handler(self) -> Optional[Any]:
+        """Access associated session handler if configured."""
+        return self._session_handler
+
+    @session_handler.setter
+    def session_handler(self, handler: Any) -> None:
+        self._session_handler = handler
 
     def handle_request(self, request_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Process an inbound JSON-RPC request and return structured response or None for notifications."""
@@ -57,20 +67,32 @@ class MCPServer:
         if method == "initialize":
             self._is_initialized = True
             client_protocol = params.get("protocolVersion", MCP_PROTOCOL_VERSION)
+            session_id: Optional[str] = None
+            if self._session_handler is not None:
+                session = self._session_handler.create_session(
+                    client_info=params.get("clientInfo"),
+                    auth_token=params.get("authToken"),
+                )
+                session_id = session.session_id
+
+            res_data: Dict[str, Any] = {
+                "protocolVersion": client_protocol or MCP_PROTOCOL_VERSION,
+                "capabilities": {
+                    "tools": {"listChanged": False},
+                    "resources": {"subscribe": False, "listChanged": False},
+                    "prompts": {"listChanged": False},
+                },
+                "serverInfo": {
+                    "name": self.config.server_name,
+                    "version": self.config.server_version,
+                },
+            }
+            if session_id:
+                res_data["sessionId"] = session_id
+
             return JSONRPCResponse(
                 id=req_id,
-                result={
-                    "protocolVersion": client_protocol or MCP_PROTOCOL_VERSION,
-                    "capabilities": {
-                        "tools": {"listChanged": False},
-                        "resources": {"subscribe": False, "listChanged": False},
-                        "prompts": {"listChanged": False},
-                    },
-                    "serverInfo": {
-                        "name": self.config.server_name,
-                        "version": self.config.server_version,
-                    },
-                },
+                result=res_data,
             ).model_dump(exclude_none=True)
 
         if method == "notifications/initialized":
@@ -210,9 +232,25 @@ class MCPServer:
                 sys.stdout.flush()
 
 
-def create_mcp_server(config: Optional[MCPConfig] = None) -> MCPServer:
+def create_mcp_server(
+    config: Optional[MCPConfig] = None,
+    tool_registry: Optional[MCPToolRegistry] = None,
+    resource_registry: Optional[MCPResourceRegistry] = None,
+    prompt_registry: Optional[MCPPromptRegistry] = None,
+    enable_session_handler: bool = False,
+) -> MCPServer:
     """Factory helper to construct a configured MCPServer instance."""
-    return MCPServer(config=config)
+    server = MCPServer(
+        config=config,
+        tool_registry=tool_registry,
+        resource_registry=resource_registry,
+        prompt_registry=prompt_registry,
+    )
+    if enable_session_handler:
+        from production_rag_evaluation.mcp.handlers import MCPSessionHandler
+
+        server.session_handler = MCPSessionHandler(auth_token=server.config.auth_token)
+    return server
 
 
 def main() -> None:

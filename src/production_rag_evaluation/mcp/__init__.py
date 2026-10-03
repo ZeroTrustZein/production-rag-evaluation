@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from production_rag_evaluation.mcp.handlers import (
+    MCPIntegrationHandler,
+    MCPNotificationDispatcher,
+    MCPSessionHandler,
+)
 from production_rag_evaluation.mcp.models import (
     JSONRPC_VERSION,
     MCP_PROTOCOL_VERSION,
@@ -14,9 +19,11 @@ from production_rag_evaluation.mcp.models import (
     MCPPromptMessage,
     MCPProtocolVersion,
     MCPResource,
+    MCPSession,
     MCPTool,
     MCPTransport,
     ToolCallResult,
+    ToolExecutionStats,
     ToolParameter,
 )
 from production_rag_evaluation.mcp.prompts import (
@@ -64,4 +71,10 @@ __all__ = [
     # Server
     "MCPServer",
     "create_mcp_server",
+    # Handlers & Subsystems
+    "MCPSessionHandler",
+    "MCPSession",
+    "MCPIntegrationHandler",
+    "MCPNotificationDispatcher",
+    "ToolExecutionStats",
 ]

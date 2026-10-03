@@ -75,7 +75,10 @@ class MCPToolRegistry:
             )
 
         try:
-            res = tool.handler(**arguments)
+            try:
+                res = tool.handler(**arguments)
+            except TypeError:
+                res = tool.handler(arguments)
             if isinstance(res, ToolCallResult):
                 return res
             if isinstance(res, str):
@@ -152,15 +155,30 @@ def handle_rag_evaluate(
     evaluator = _get_evaluator()
     active_ticker = ticker or "DEFAULT"
 
-    chunks = [
-        DocumentChunk(
-            chunk_id=f"ctx-{idx + 1}",
-            text=c,
-            doc_type=DocumentType.SEC_10K if ticker else DocumentType.FINANCIAL_NEWS,
-            ticker=active_ticker,
-        )
-        for idx, c in enumerate(context_chunks)
-    ]
+    chunks = []
+    for idx, c in enumerate(context_chunks):
+        if isinstance(c, DocumentChunk):
+            chunks.append(c)
+        elif isinstance(c, dict):
+            c_text = c.get("text", c.get("content", ""))
+            c_id = c.get("chunk_id", f"ctx-{idx + 1}")
+            chunks.append(
+                DocumentChunk(
+                    chunk_id=c_id,
+                    text=c_text,
+                    doc_type=DocumentType.SEC_10K if ticker else DocumentType.FINANCIAL_NEWS,
+                    ticker=active_ticker,
+                )
+            )
+        else:
+            chunks.append(
+                DocumentChunk(
+                    chunk_id=f"ctx-{idx + 1}",
+                    text=str(c),
+                    doc_type=DocumentType.SEC_10K if ticker else DocumentType.FINANCIAL_NEWS,
+                    ticker=active_ticker,
+                )
+            )
 
     targets: List[NumericalTarget] = []
     if numerical_targets:
