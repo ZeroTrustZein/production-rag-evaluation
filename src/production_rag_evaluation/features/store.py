@@ -15,6 +15,7 @@ from production_rag_evaluation.features.models import (
     FeatureGroup,
     FeatureRecord,
     FeatureStatistics,
+    ensure_utc,
 )
 
 

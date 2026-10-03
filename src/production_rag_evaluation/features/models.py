@@ -6,9 +6,22 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from production_rag_evaluation.models.schemas import AlertSeverity
+
+
+def ensure_utc(val: Any) -> datetime:
+    """Normalize datetime or ISO string to UTC-aware datetime."""
+    if isinstance(val, str):
+        try:
+            val = datetime.fromisoformat(val)
+        except Exception:
+            return datetime.now(timezone.utc)
+    if isinstance(val, datetime):
+        return val if val.tzinfo is not None else val.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc)
 
 
 class ExportFormat(str, Enum):
@@ -83,6 +96,26 @@ class FeatureValueType(str, Enum):
     BOOLEAN = "BOOLEAN"
     TIMESTAMP = "TIMESTAMP"
     LIST_FLOAT = "LIST_FLOAT"
+
+    def is_valid(self, val: Any) -> bool:
+        """Validate whether a given runtime value conforms to this feature value type."""
+        if val is None:
+            return False
+        if self == FeatureValueType.BOOLEAN:
+            return isinstance(val, bool)
+        if self == FeatureValueType.INT:
+            return isinstance(val, int) and not isinstance(val, bool)
+        if self == FeatureValueType.FLOAT:
+            return isinstance(val, (int, float)) and not isinstance(val, bool)
+        if self == FeatureValueType.STRING:
+            return isinstance(val, str)
+        if self == FeatureValueType.TIMESTAMP:
+            return isinstance(val, (datetime, str))
+        if self == FeatureValueType.LIST_FLOAT:
+            return isinstance(val, (list, tuple, np.ndarray)) and all(
+                isinstance(x, (int, float)) and not isinstance(x, bool) for x in val
+            )
+        return False
 
 
 class FeatureGroup(str, Enum):

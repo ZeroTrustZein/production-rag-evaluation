@@ -396,31 +396,10 @@ class FeatureRegistry:
                 continue
 
             # Type check
-            if fdef.value_type == FeatureValueType.BOOLEAN:
-                if not isinstance(fval, bool):
-                    errors.append(
-                        f"Feature '{fname}' expected BOOLEAN, received {type(fval).__name__}"
-                    )
-            elif fdef.value_type == FeatureValueType.INT:
-                if not isinstance(fval, int) or isinstance(fval, bool):
-                    errors.append(f"Feature '{fname}' expected INT, received {type(fval).__name__}")
-            elif fdef.value_type == FeatureValueType.FLOAT:
-                if not isinstance(fval, (int, float)) or isinstance(fval, bool):
-                    errors.append(
-                        f"Feature '{fname}' expected FLOAT, received {type(fval).__name__}"
-                    )
-            elif fdef.value_type == FeatureValueType.STRING:
-                if not isinstance(fval, str):
-                    errors.append(
-                        f"Feature '{fname}' expected STRING, received {type(fval).__name__}"
-                    )
-            elif fdef.value_type == FeatureValueType.LIST_FLOAT:
-                if not isinstance(fval, list) or not all(
-                    isinstance(x, (int, float)) and not isinstance(x, bool) for x in fval
-                ):
-                    errors.append(
-                        f"Feature '{fname}' expected LIST_FLOAT, received {type(fval).__name__}"
-                    )
+            if not fdef.value_type.is_valid(fval):
+                errors.append(
+                    f"Feature '{fname}' expected {fdef.value_type.value}, received {type(fval).__name__}"
+                )
 
         # Check required non-nullable fields missing from record if strict
         if strict:

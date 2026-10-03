@@ -54,21 +54,8 @@ class BaseFeatureExtractor(ABC):
                 if not feat_def.nullable:
                     return False
                 continue
-            if feat_def.value_type == FeatureValueType.FLOAT:
-                if not isinstance(val, (float, int)) or isinstance(val, bool):
-                    return False
-            elif feat_def.value_type == FeatureValueType.INT:
-                if not isinstance(val, int) or isinstance(val, bool):
-                    return False
-            elif feat_def.value_type == FeatureValueType.STRING:
-                if not isinstance(val, str):
-                    return False
-            elif feat_def.value_type == FeatureValueType.BOOLEAN:
-                if not isinstance(val, bool):
-                    return False
-            elif feat_def.value_type == FeatureValueType.LIST_FLOAT:
-                if not isinstance(val, (list, tuple, np.ndarray)):
-                    return False
+            if not feat_def.value_type.is_valid(val):
+                return False
         return True
 
 
