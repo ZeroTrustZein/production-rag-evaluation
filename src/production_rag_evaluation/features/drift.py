@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 import numpy as np
+import pyarrow.parquet as pq
 
 from production_rag_evaluation.features.models import (
     FeatureDriftReport,
@@ -86,6 +87,16 @@ class FeatureDriftDetector:
         psi_val = np.sum((t_pct - b_pct) * np.log(t_pct / b_pct))
         return float(max(0.0, psi_val))
 
+    @staticmethod
+    def _extract_numeric_series(records: List[FeatureRecord], feature_name: str) -> List[float]:
+        return [
+            float(v)
+            for r in records
+            if (v := r.features.get(feature_name)) is not None
+            and isinstance(v, (int, float))
+            and not isinstance(v, bool)
+        ]
+
     def detect_feature_drift(
         self,
         feature_name: str,
@@ -96,24 +107,17 @@ class FeatureDriftDetector:
         """Evaluate distribution drift for a single feature between baseline store and current data."""
         # Baseline from historical store
         baseline_recs = self.store.read_records(group=group)
-        b_vals: List[float] = []
-        for r in baseline_recs:
-            v = r.features.get(feature_name)
-            if v is not None and isinstance(v, (int, float)) and not isinstance(v, bool):
-                b_vals.append(float(v))
+        b_vals = self._extract_numeric_series(baseline_recs, feature_name)
 
         # Current records from argument or pipeline sliding window
-        target_recs: List[FeatureRecord] = []
         if current_records is not None:
             target_recs = current_records
         elif self.pipeline is not None:
             target_recs = [r for r in self.pipeline._window_history if r.feature_group == group]
+        else:
+            target_recs = []
 
-        t_vals: List[float] = []
-        for r in target_recs:
-            v = r.features.get(feature_name)
-            if v is not None and isinstance(v, (int, float)) and not isinstance(v, bool):
-                t_vals.append(float(v))
+        t_vals = self._extract_numeric_series(target_recs, feature_name)
 
         if len(b_vals) < 3 or len(t_vals) < 3:
             return FeatureDriftReport(
@@ -181,8 +185,6 @@ class FeatureDriftDetector:
             fp = self.store._get_parquet_path(grp)
             if not fp.exists():
                 continue
-
-            import pyarrow.parquet as pq
 
             schema = pq.read_schema(fp)
             for name in schema.names:

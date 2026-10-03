@@ -54,6 +54,14 @@ class StreamingFeaturePipeline:
         self.evaluation_extractor = EvaluationFeatureExtractor()
         self.financial_extractor = FinancialFeatureExtractor()
 
+        self._extractors: Dict[type, Any] = {
+            RAGQuery: self.query_extractor,
+            DocumentChunk: self.chunk_extractor,
+            RAGResponse: self.response_extractor,
+            EvaluationMetrics: self.evaluation_extractor,
+            RiskMetrics: self.financial_extractor,
+        }
+
         # In-memory buffer & sliding window state
         self._buffer: List[FeatureRecord] = []
         self._window_history: Deque[FeatureRecord] = deque(maxlen=window_size)
@@ -71,18 +79,10 @@ class StreamingFeaturePipeline:
         self._total_ingested += 1
         record: Optional[FeatureRecord] = None
 
-        if isinstance(item, RAGQuery):
-            record = self.query_extractor.extract(item)
-        elif isinstance(item, DocumentChunk):
-            record = self.chunk_extractor.extract(item)
-        elif isinstance(item, RAGResponse):
-            record = self.response_extractor.extract(item)
-        elif isinstance(item, EvaluationMetrics):
-            record = self.evaluation_extractor.extract(item)
-        elif isinstance(item, RiskMetrics):
-            record = self.financial_extractor.extract(item)
-        elif isinstance(item, FeatureRecord):
+        if isinstance(item, FeatureRecord):
             record = item
+        elif extractor := self._extractors.get(type(item)):
+            record = extractor.extract(item)
 
         if record is not None:
             # Check deduplication if enabled
