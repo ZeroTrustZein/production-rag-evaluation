@@ -417,3 +417,92 @@ class TestStressTestingAndTelemetryEdgeCases:
         res = collector.detect_drift(baseline_size=20, test_size=10)
         assert res["drift_detected"] is False
         assert "Insufficient data points" in res["reason"]
+
+
+class TestMCPEdgeCases:
+    """Edge cases for MCP tools, registries, and server communication."""
+
+    def test_mcp_call_tool_missing_required_args(self) -> None:
+        from production_rag_evaluation.mcp.tools import get_default_tool_registry
+
+        reg = get_default_tool_registry()
+
+        # rag_evaluate missing query_text
+        res_eval = reg.call(
+            "rag_evaluate",
+            {"generated_answer": "test", "context_chunks": ["c1"]},
+        )
+        assert res_eval.isError is True
+        assert "Missing required argument" in res_eval.content[0]["text"]
+
+        # rag_risk_metrics missing returns
+        res_risk = reg.call("rag_risk_metrics", {})
+        assert res_risk.isError is True
+        assert "Missing required argument" in res_risk.content[0]["text"]
+
+        # rag_stress_test missing returns
+        res_stress = reg.call("rag_stress_test", {})
+        assert res_stress.isError is True
+        assert "Missing required argument" in res_stress.content[0]["text"]
+
+        # rag_cache_lookup GET missing query_text
+        res_cache = reg.call("rag_cache_lookup", {"action": "GET"})
+        assert res_cache.isError is True
+        assert "query_text is required" in res_cache.content[0]["text"]
+
+    def test_mcp_call_tool_malformed_argument_types(self) -> None:
+        from production_rag_evaluation.mcp.tools import get_default_tool_registry
+
+        reg = get_default_tool_registry()
+
+        # non-array returns
+        res = reg.call("rag_risk_metrics", {"returns": "not-an-array"})
+        assert res.isError is True
+        assert "must be an array" in res.content[0]["text"]
+
+        # invalid numerical returns values
+        res_invalid = reg.call("rag_risk_metrics", {"returns": ["abc", "xyz"]})
+        assert res_invalid.isError is True
+        assert "Invalid return series" in res_invalid.content[0]["text"]
+
+    def test_mcp_server_protocol_invalid_rpc(self) -> None:
+        import json
+        from production_rag_evaluation.mcp.server import create_mcp_server
+
+        server = create_mcp_server()
+
+        # Non-JSON string message
+        raw = server.handle_message("not-json")
+        assert raw is not None
+        parsed = json.loads(raw)
+        assert parsed["error"]["code"] == -32700
+
+        # Method not found
+        res = server.handle_request({
+            "jsonrpc": "2.0",
+            "id": "err-1",
+            "method": "non_existent_rpc_method",
+        })
+        assert res is not None
+        assert res["error"]["code"] == -32601
+
+        # tools/call with missing tool name
+        call_missing_name = server.handle_request({
+            "jsonrpc": "2.0",
+            "id": "err-2",
+            "method": "tools/call",
+            "params": {"name": "non_existent_tool_xyz", "arguments": {}},
+        })
+        assert call_missing_name is not None
+        assert call_missing_name["result"]["isError"] is True
+
+        # prompts/get unknown prompt
+        prompt_missing = server.handle_request({
+            "jsonrpc": "2.0",
+            "id": "err-3",
+            "method": "prompts/get",
+            "params": {"name": "unknown_prompt"},
+        })
+        assert prompt_missing is not None
+        assert prompt_missing["error"]["code"] == -32602
+
