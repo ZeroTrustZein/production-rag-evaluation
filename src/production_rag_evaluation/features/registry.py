@@ -351,9 +351,7 @@ class FeatureRegistry:
         """Retrieve all currently registered group schemas."""
         return dict(self._schemas)
 
-    def list_definitions(
-        self, group: Optional[FeatureGroup] = None
-    ) -> List[FeatureDefinition]:
+    def list_definitions(self, group: Optional[FeatureGroup] = None) -> List[FeatureDefinition]:
         """List all registered feature definitions, optionally filtered by group."""
         if group is not None:
             schema = self.get_schema(group)

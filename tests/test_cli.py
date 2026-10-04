@@ -810,8 +810,17 @@ class TestCLIMCPCommands:
             # http/sse serve fallback to stdio dispatcher
             res_http = cli_runner.invoke(
                 cli,
-                ["mcp", "serve", "--transport", "http", "--host", "127.0.0.1", "--port", "9000", "--debug"],
+                [
+                    "mcp",
+                    "serve",
+                    "--transport",
+                    "http",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "9000",
+                    "--debug",
+                ],
             )
             assert res_http.exit_code == 0
             assert "Network transport 'http' initialized" in res_http.output
-

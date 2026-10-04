@@ -309,12 +309,14 @@ def test_mcp_scaffold_lifecycle(sample_chunk_apple: DocumentChunk):
     server = create_mcp_server(config)
 
     # Handshake
-    init_resp = server.handle_request({
-        "jsonrpc": "2.0",
-        "id": "req-1",
-        "method": "initialize",
-        "params": {"protocolVersion": "2024-11-05"},
-    })
+    init_resp = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "req-1",
+            "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05"},
+        }
+    )
     assert init_resp is not None
     assert init_resp["result"]["serverInfo"]["name"] == "test-rag-mcp"
     assert "tools" in init_resp["result"]["capabilities"]
@@ -329,20 +331,22 @@ def test_mcp_scaffold_lifecycle(sample_chunk_apple: DocumentChunk):
     assert "rag_stress_test" in tool_names
 
     # Tool execution - rag_evaluate
-    eval_call = server.handle_request({
-        "jsonrpc": "2.0",
-        "id": "req-3",
-        "method": "tools/call",
-        "params": {
-            "name": "rag_evaluate",
-            "arguments": {
-                "query_text": "What were net sales?",
-                "generated_answer": "Apple reported net sales of $391.0 billion.",
-                "context_chunks": [sample_chunk_apple.text],
-                "ticker": "AAPL",
+    eval_call = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "req-3",
+            "method": "tools/call",
+            "params": {
+                "name": "rag_evaluate",
+                "arguments": {
+                    "query_text": "What were net sales?",
+                    "generated_answer": "Apple reported net sales of $391.0 billion.",
+                    "context_chunks": [sample_chunk_apple.text],
+                    "ticker": "AAPL",
+                },
             },
-        },
-    })
+        }
+    )
     assert eval_call is not None
     assert not eval_call["result"]["isError"]
     eval_data = json.loads(eval_call["result"]["content"][0]["text"])
@@ -355,31 +359,34 @@ def test_mcp_scaffold_lifecycle(sample_chunk_apple: DocumentChunk):
     uris = [r["uri"] for r in res_list["result"]["resources"]]
     assert "rag://system/health" in uris
 
-    res_read = server.handle_request({
-        "jsonrpc": "2.0",
-        "id": "req-5",
-        "method": "resources/read",
-        "params": {"uri": "rag://system/health"},
-    })
+    res_read = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "req-5",
+            "method": "resources/read",
+            "params": {"uri": "rag://system/health"},
+        }
+    )
     assert res_read is not None
     health_payload = json.loads(res_read["result"]["contents"][0]["text"])
     assert health_payload["status"] == "HEALTHY"
 
     # Prompt rendering
-    prompt_get = server.handle_request({
-        "jsonrpc": "2.0",
-        "id": "req-6",
-        "method": "prompts/get",
-        "params": {
-            "name": "earnings_call_audit",
-            "arguments": {
-                "company": "Apple Inc.",
-                "quarter": "Q4 2024",
-                "transcript_segment": sample_chunk_apple.text,
-                "generated_summary": "Net sales hit $391.0 billion.",
+    prompt_get = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "req-6",
+            "method": "prompts/get",
+            "params": {
+                "name": "earnings_call_audit",
+                "arguments": {
+                    "company": "Apple Inc.",
+                    "quarter": "Q4 2024",
+                    "transcript_segment": sample_chunk_apple.text,
+                    "generated_summary": "Net sales hit $391.0 billion.",
+                },
             },
-        },
-    })
+        }
+    )
     assert prompt_get is not None
     assert "Apple Inc." in prompt_get["result"]["messages"][0]["content"]["text"]
-

@@ -888,15 +888,17 @@ class TestMCPSubsystems:
         server = create_mcp_server(MCPConfig(server_name="unit-mcp", server_version="1.2.3"))
 
         # Initialize
-        init_res = server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 101,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "clientInfo": {"name": "test-client", "version": "1.0"},
-            },
-        })
+        init_res = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 101,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "clientInfo": {"name": "test-client", "version": "1.0"},
+                },
+            }
+        )
         assert init_res is not None
         assert init_res["id"] == 101
         assert init_res["result"]["serverInfo"]["name"] == "unit-mcp"
@@ -904,19 +906,23 @@ class TestMCPSubsystems:
         assert "tools" in init_res["result"]["capabilities"]
 
         # Notification: initialized
-        notif_res = server.handle_request({
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-        })
+        notif_res = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+            }
+        )
         assert notif_res is None
         assert server._is_initialized is True
 
         # Ping
-        ping_res = server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 102,
-            "method": "ping",
-        })
+        ping_res = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 102,
+                "method": "ping",
+            }
+        )
         assert ping_res is not None
         assert ping_res["result"] == {}
 
@@ -939,21 +945,25 @@ class TestMCPSubsystems:
         assert invalid_req["error"]["code"] == -32600
 
         # Method Not Found (-32601)
-        missing_method = server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 201,
-            "method": "unsupported/method",
-        })
+        missing_method = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 201,
+                "method": "unsupported/method",
+            }
+        )
         assert missing_method is not None
         assert missing_method["error"]["code"] == -32601
 
         # Invalid Params for tools/call (-32602)
-        invalid_params = server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 202,
-            "method": "tools/call",
-            "params": {},
-        })
+        invalid_params = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 202,
+                "method": "tools/call",
+                "params": {},
+            }
+        )
         assert invalid_params is not None
         assert invalid_params["error"]["code"] == -32602
 
@@ -965,11 +975,13 @@ class TestMCPSubsystems:
         server = MCPServer()
 
         # Batch request containing 2 calls and 1 notification
-        batch_msg = json.dumps([
-            {"jsonrpc": "2.0", "id": 1, "method": "ping"},
-            {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-        ])
+        batch_msg = json.dumps(
+            [
+                {"jsonrpc": "2.0", "id": 1, "method": "ping"},
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            ]
+        )
         raw_res = server.handle_message(batch_msg)
         assert raw_res is not None
         res_list = json.loads(raw_res)
@@ -1027,7 +1039,9 @@ class TestMCPSubsystems:
         def failing_handler(args):
             raise RuntimeError("Underlying subsystem failure")
 
-        tool_fail = MCPTool(name="failing_tool", description="Always fails", handler=failing_handler)
+        tool_fail = MCPTool(
+            name="failing_tool", description="Always fails", handler=failing_handler
+        )
         registry.register(tool_fail)
         fail_res = registry.call("failing_tool", {})
         assert fail_res.isError is True

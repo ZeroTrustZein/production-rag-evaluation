@@ -101,7 +101,10 @@ def _provide_features_schema() -> str:
 def _provide_finance_scenarios() -> str:
     """Dynamic generator for available stress test scenarios."""
     scenarios = [
-        {"name": s.value, "description": f"Simulation profile for {s.value.replace('_', ' ').title()}"}
+        {
+            "name": s.value,
+            "description": f"Simulation profile for {s.value.replace('_', ' ').title()}",
+        }
         for s in StressScenarioType
     ]
     return json.dumps({"scenarios": scenarios}, indent=2)

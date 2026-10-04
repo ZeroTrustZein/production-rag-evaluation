@@ -439,12 +439,18 @@ class TestMCPEdgeCases:
         # rag_risk_metrics missing returns
         res_risk = reg.call("rag_risk_metrics", {})
         assert res_risk.isError is True
-        assert "Missing required argument" in res_risk.content[0]["text"] or "Invalid arguments" in res_risk.content[0]["text"]
+        assert (
+            "Missing required argument" in res_risk.content[0]["text"]
+            or "Invalid arguments" in res_risk.content[0]["text"]
+        )
 
         # rag_stress_test missing returns
         res_stress = reg.call("rag_stress_test", {})
         assert res_stress.isError is True
-        assert "Missing required argument" in res_stress.content[0]["text"] or "Invalid arguments" in res_stress.content[0]["text"]
+        assert (
+            "Missing required argument" in res_stress.content[0]["text"]
+            or "Invalid arguments" in res_stress.content[0]["text"]
+        )
 
         # rag_cache_lookup GET missing query_text
         res_cache = reg.call("rag_cache_lookup", {"action": "GET"})
@@ -463,7 +469,10 @@ class TestMCPEdgeCases:
         # invalid numerical returns values
         res_invalid = reg.call("rag_risk_metrics", {"returns": ["abc", "xyz"]})
         assert res_invalid.isError is True
-        assert "could not convert" in res_invalid.content[0]["text"] or "Invalid return series" in res_invalid.content[0]["text"]
+        assert (
+            "could not convert" in res_invalid.content[0]["text"]
+            or "Invalid return series" in res_invalid.content[0]["text"]
+        )
 
     def test_mcp_server_protocol_invalid_rpc(self) -> None:
         import json
@@ -479,31 +488,37 @@ class TestMCPEdgeCases:
         assert parsed["error"]["code"] == -32700
 
         # Method not found
-        res = server.handle_request({
-            "jsonrpc": "2.0",
-            "id": "err-1",
-            "method": "non_existent_rpc_method",
-        })
+        res = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": "err-1",
+                "method": "non_existent_rpc_method",
+            }
+        )
         assert res is not None
         assert res["error"]["code"] == -32601
 
         # tools/call with missing tool name
-        call_missing_name = server.handle_request({
-            "jsonrpc": "2.0",
-            "id": "err-2",
-            "method": "tools/call",
-            "params": {"name": "non_existent_tool_xyz", "arguments": {}},
-        })
+        call_missing_name = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": "err-2",
+                "method": "tools/call",
+                "params": {"name": "non_existent_tool_xyz", "arguments": {}},
+            }
+        )
         assert call_missing_name is not None
         assert call_missing_name["result"]["isError"] is True
 
         # prompts/get unknown prompt
-        prompt_missing = server.handle_request({
-            "jsonrpc": "2.0",
-            "id": "err-3",
-            "method": "prompts/get",
-            "params": {"name": "unknown_prompt"},
-        })
+        prompt_missing = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": "err-3",
+                "method": "prompts/get",
+                "params": {"name": "unknown_prompt"},
+            }
+        )
         assert prompt_missing is not None
         assert prompt_missing["error"]["code"] == -32602
 
@@ -593,4 +608,3 @@ class TestMCPEdgeCases:
         res_clear = reg.call("rag_cache_lookup", {"action": "CLEAR"})
         assert res_clear.isError is False
         assert "CLEAR" in res_clear.content[0]["text"]
-

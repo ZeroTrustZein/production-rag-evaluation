@@ -274,7 +274,9 @@ class MCPIntegrationHandler:
             if not tool_name:
                 return JSONRPCResponse(
                     id=req_id,
-                    error=JSONRPCError(code=-32602, message="Invalid params: 'name' is required for tools/call"),
+                    error=JSONRPCError(
+                        code=-32602, message="Invalid params: 'name' is required for tools/call"
+                    ),
                 ).model_dump(exclude_none=True)
 
             res = self.execute_tool(tool_name, tool_args)

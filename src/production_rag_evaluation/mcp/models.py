@@ -74,7 +74,9 @@ class ToolParameter(BaseModel):
     type: str = Field(default="string", description="JSON schema data type")
     description: str = Field(default="", description="Explanatory text for client LLMs")
     required: bool = Field(default=True, description="Whether client must supply this field")
-    default: Optional[Any] = Field(default=None, description="Default value if parameter is omitted")
+    default: Optional[Any] = Field(
+        default=None, description="Default value if parameter is omitted"
+    )
 
 
 class MCPTool(BaseModel):
@@ -129,7 +131,11 @@ class MCPTool(BaseModel):
                     "type": "object",
                     "properties": properties,
                     "required": required,
-                    **{k: v for k, v in schema.items() if k not in ("properties", "required", "type")},
+                    **{
+                        k: v
+                        for k, v in schema.items()
+                        if k not in ("properties", "required", "type")
+                    },
                 }
         return data
 
@@ -153,7 +159,9 @@ class ToolCallResult(BaseModel):
     )
 
     @classmethod
-    def text(cls, text: str, is_error: bool = False, metadata: Optional[Dict[str, Any]] = None) -> ToolCallResult:
+    def text(
+        cls, text: str, is_error: bool = False, metadata: Optional[Dict[str, Any]] = None
+    ) -> ToolCallResult:
         """Helper to create a plain text tool response block."""
         return cls(
             content=[{"type": "text", "text": text}],
@@ -270,7 +278,9 @@ class MCPSession(BaseModel):
         default=MCP_PROTOCOL_VERSION, description="Negotiated protocol specification version"
     )
     is_authenticated: bool = Field(default=True, description="Whether session is authenticated")
-    created_at: float = Field(default_factory=lambda: time.time(), description="Epoch timestamp of creation")
+    created_at: float = Field(
+        default_factory=lambda: time.time(), description="Epoch timestamp of creation"
+    )
     last_active_at: float = Field(
         default_factory=lambda: time.time(), description="Epoch timestamp of last interaction"
     )

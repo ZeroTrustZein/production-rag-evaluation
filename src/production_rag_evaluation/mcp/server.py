@@ -115,7 +115,9 @@ class MCPServer:
             if not tool_name:
                 return JSONRPCResponse(
                     id=req_id,
-                    error=JSONRPCError(code=-32602, message="Invalid params: 'name' is required for tools/call"),
+                    error=JSONRPCError(
+                        code=-32602, message="Invalid params: 'name' is required for tools/call"
+                    ),
                 ).model_dump(exclude_none=True)
 
             result = self.tool_registry.call(tool_name, tool_args)
@@ -131,14 +133,18 @@ class MCPServer:
         # Resources API
         if method == "resources/list":
             resources = self.resource_registry.list_resources()
-            return JSONRPCResponse(id=req_id, result={"resources": resources}).model_dump(exclude_none=True)
+            return JSONRPCResponse(id=req_id, result={"resources": resources}).model_dump(
+                exclude_none=True
+            )
 
         if method == "resources/read":
             uri = params.get("uri")
             if not uri:
                 return JSONRPCResponse(
                     id=req_id,
-                    error=JSONRPCError(code=-32602, message="Invalid params: 'uri' is required for resources/read"),
+                    error=JSONRPCError(
+                        code=-32602, message="Invalid params: 'uri' is required for resources/read"
+                    ),
                 ).model_dump(exclude_none=True)
 
             try:
@@ -158,7 +164,9 @@ class MCPServer:
         # Prompts API
         if method == "prompts/list":
             prompts = self.prompt_registry.list_prompts()
-            return JSONRPCResponse(id=req_id, result={"prompts": prompts}).model_dump(exclude_none=True)
+            return JSONRPCResponse(id=req_id, result={"prompts": prompts}).model_dump(
+                exclude_none=True
+            )
 
         if method == "prompts/get":
             prompt_name = params.get("name")
@@ -166,7 +174,9 @@ class MCPServer:
             if not prompt_name:
                 return JSONRPCResponse(
                     id=req_id,
-                    error=JSONRPCError(code=-32602, message="Invalid params: 'name' is required for prompts/get"),
+                    error=JSONRPCError(
+                        code=-32602, message="Invalid params: 'name' is required for prompts/get"
+                    ),
                 ).model_dump(exclude_none=True)
 
             try:
@@ -255,7 +265,9 @@ def create_mcp_server(
 
 def main() -> None:
     """CLI executable entry point for the MCP server."""
-    parser = argparse.ArgumentParser(description="Production RAG Evaluation Model Context Protocol (MCP) Server")
+    parser = argparse.ArgumentParser(
+        description="Production RAG Evaluation Model Context Protocol (MCP) Server"
+    )
     parser.add_argument(
         "--transport",
         choices=["stdio", "sse", "http"],
@@ -263,7 +275,9 @@ def main() -> None:
         help="Transport protocol (default: stdio)",
     )
     parser.add_argument("--host", default="127.0.0.1", help="Host interface (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8000, help="Port for network transport (default: 8000)")
+    parser.add_argument(
+        "--port", type=int, default=8000, help="Port for network transport (default: 8000)"
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()

@@ -52,7 +52,9 @@ class MCPPromptRegistry:
         # Validate mandatory arguments
         for arg in prompt.arguments:
             if arg.required and arg.name not in arguments:
-                raise ValueError(f"Missing required prompt argument '{arg.name}' for prompt '{name}'")
+                raise ValueError(
+                    f"Missing required prompt argument '{arg.name}' for prompt '{name}'"
+                )
 
         template = prompt.template or ""
         # Safe replacement of placeholders
@@ -85,8 +87,12 @@ def get_default_prompt_registry() -> MCPPromptRegistry:
             name="earnings_call_audit",
             description="Audit quarterly financial earnings call transcript Q&A against model summary.",
             arguments=[
-                MCPPromptArgument(name="company", description="Company or firm name", required=True),
-                MCPPromptArgument(name="quarter", description="Fiscal quarter (e.g. Q3 2024)", required=True),
+                MCPPromptArgument(
+                    name="company", description="Company or firm name", required=True
+                ),
+                MCPPromptArgument(
+                    name="quarter", description="Fiscal quarter (e.g. Q3 2024)", required=True
+                ),
                 MCPPromptArgument(
                     name="transcript_segment",
                     description="Raw transcript excerpt of CEO/CFO remarks",
@@ -126,7 +132,11 @@ Provide a clear verdict: PASS, CONDITIONAL_PASS, or FAIL with itemized citations
             description="Cross-reference specific claims against audited SEC Form 10-K disclosures.",
             arguments=[
                 MCPPromptArgument(name="ticker", description="Equity ticker symbol", required=True),
-                MCPPromptArgument(name="fiscal_year", description="Fiscal year period (e.g. FY2024)", required=True),
+                MCPPromptArgument(
+                    name="fiscal_year",
+                    description="Fiscal year period (e.g. FY2024)",
+                    required=True,
+                ),
                 MCPPromptArgument(
                     name="filing_excerpt",
                     description="Audited 10-K section text (e.g. Item 7 MD&A or Note 12)",
@@ -163,7 +173,9 @@ Instructions:
             name="portfolio_risk_audit",
             description="Interpret quantitative risk metrics and stress test output for portfolio risk management.",
             arguments=[
-                MCPPromptArgument(name="portfolio_id", description="Portfolio code or label", required=True),
+                MCPPromptArgument(
+                    name="portfolio_id", description="Portfolio code or label", required=True
+                ),
                 MCPPromptArgument(
                     name="risk_metrics_json",
                     description="JSON metrics containing Sharpe, Sortino, VaR, CVaR",

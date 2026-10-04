@@ -1127,7 +1127,9 @@ def mcp_call_tool_cmd(name: str, arguments: str, json_out: bool) -> None:
     tool_reg = get_default_tool_registry()
     tool = tool_reg.get(name)
     if not tool:
-        raise click.BadParameter(f"Unknown MCP tool '{name}'. Run 'rag-eval mcp list-tools' to view available tools.")
+        raise click.BadParameter(
+            f"Unknown MCP tool '{name}'. Run 'rag-eval mcp list-tools' to view available tools."
+        )
 
     result = tool_reg.call(name, parsed_args)
 
@@ -1135,7 +1137,9 @@ def mcp_call_tool_cmd(name: str, arguments: str, json_out: bool) -> None:
         click.echo(result.model_dump_json(indent=2))
         return
 
-    status_str = "[bold red]ERROR[/bold red]" if result.isError else "[bold green]SUCCESS[/bold green]"
+    status_str = (
+        "[bold red]ERROR[/bold red]" if result.isError else "[bold green]SUCCESS[/bold green]"
+    )
     table = Table(title=f"MCP Tool Execution: {name} ({status_str})")
     table.add_column("Field", style="cyan")
     table.add_column("Value", style="magenta")
@@ -1152,7 +1156,6 @@ def mcp_call_tool_cmd(name: str, arguments: str, json_out: bool) -> None:
         table.add_row("Metadata", json.dumps(result.metadata, indent=2))
 
     console.print(table)
-
 
 
 @feature_store_group.command(name="compact")

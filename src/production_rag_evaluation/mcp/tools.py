@@ -216,16 +216,22 @@ def handle_rag_evaluate(
         citations=citations,
     )
 
-    eval_mode = EvaluationMode(mode.upper()) if hasattr(EvaluationMode, mode.upper()) else EvaluationMode.THOROUGH
+    eval_mode = (
+        EvaluationMode(mode.upper())
+        if hasattr(EvaluationMode, mode.upper())
+        else EvaluationMode.THOROUGH
+    )
     metrics = evaluator.evaluate(rag_query, rag_resp, mode=eval_mode)
 
     overall_score = float(
-        np.mean([
-            metrics.faithfulness_score,
-            metrics.answer_relevance_score,
-            metrics.context_precision_score,
-            metrics.citation_grounding_score,
-        ])
+        np.mean(
+            [
+                metrics.faithfulness_score,
+                metrics.answer_relevance_score,
+                metrics.context_precision_score,
+                metrics.citation_grounding_score,
+            ]
+        )
     )
 
     return {
@@ -346,7 +352,9 @@ def handle_rag_risk_metrics(
         "annualized_return": round(metrics.annualized_return, 4),
         "annualized_volatility": round(metrics.annualized_volatility, 4),
         "downside_deviation": round(metrics.downside_deviation, 4),
-        "information_ratio": round(metrics.information_ratio, 4) if metrics.information_ratio is not None else None,
+        "information_ratio": round(metrics.information_ratio, 4)
+        if metrics.information_ratio is not None
+        else None,
         "beta": round(metrics.beta, 4) if metrics.beta is not None else None,
         "alpha": round(metrics.alpha, 4) if metrics.alpha is not None else None,
     }
@@ -490,13 +498,19 @@ def get_default_tool_registry() -> MCPToolRegistry:
                 "type": "object",
                 "properties": {
                     "query_text": {"type": "string", "description": "User question or prompt"},
-                    "generated_answer": {"type": "string", "description": "Candidate generated LLM answer"},
+                    "generated_answer": {
+                        "type": "string",
+                        "description": "Candidate generated LLM answer",
+                    },
                     "context_chunks": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Retrieved context passages or filings",
                     },
-                    "ticker": {"type": "string", "description": "Optional asset or stock ticker (e.g. AAPL)"},
+                    "ticker": {
+                        "type": "string",
+                        "description": "Optional asset or stock ticker (e.g. AAPL)",
+                    },
                     "mode": {
                         "type": "string",
                         "enum": ["FAST", "BALANCED", "THOROUGH", "STRICT"],
@@ -522,7 +536,10 @@ def get_default_tool_registry() -> MCPToolRegistry:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "generated_answer": {"type": "string", "description": "Generated text under audit"},
+                    "generated_answer": {
+                        "type": "string",
+                        "description": "Generated text under audit",
+                    },
                     "context_chunks": {
                         "type": "array",
                         "items": {"type": "string"},
