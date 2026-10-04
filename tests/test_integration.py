@@ -330,3 +330,118 @@ class TestDriftDetectionAndAlertingWorkflow:
         assert drift_result["drift_detected"] is True
         assert drift_result["p_value"] < 0.05
         assert drift_result["recent_mean"] < drift_result["baseline_mean"]
+
+
+class TestMCPFullIntegrationPipeline:
+    """Full integration tests combining MCP Server, FeatureStore, RiskTelemetry, and Evaluator."""
+
+    def test_mcp_evaluation_feature_store_and_telemetry_loop(self, tmp_path) -> None:
+        import json
+
+        from production_rag_evaluation.features.models import FeatureGroup
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+        from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
+        from production_rag_evaluation.mcp.handlers import (
+            MCPIntegrationHandler,
+            MCPNotificationDispatcher,
+        )
+        from production_rag_evaluation.mcp.server import create_mcp_server
+
+        feature_store = ParquetFeatureStore(base_path=tmp_path / "mcp_integ_fs")
+        telemetry_collector = RiskTelemetryCollector()
+        dispatcher = MCPNotificationDispatcher()
+        received_alerts = []
+
+        dispatcher.subscribe("telemetry/eval", lambda t, p: received_alerts.append(p))
+
+        integration_handler = MCPIntegrationHandler(
+            feature_store=feature_store,
+            telemetry_collector=telemetry_collector,
+            notification_dispatcher=dispatcher,
+        )
+
+        server = create_mcp_server()
+        # Bind integration handler to server tools
+        for tool_name in ["rag_evaluate", "rag_risk_metrics"]:
+            t = server.tool_registry.get(tool_name)
+            if t:
+                server.tool_registry.register(
+                    t.model_copy(
+                        update={
+                            "handler": lambda args, tn=tool_name: integration_handler.execute_tool(
+                                tn, args
+                            )
+                        }
+                    )
+                )
+
+        # 1. Execute evaluate via server RPC
+        resp_eval = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": "integ-1",
+                "method": "tools/call",
+                "params": {
+                    "name": "rag_evaluate",
+                    "arguments": {
+                        "query_text": "What was Amazon AWS operating profit?",
+                        "generated_answer": "Amazon AWS operating profit was $10.4 billion in Q3.",
+                        "context_chunks": [
+                            "Amazon AWS operating profit was $10.4 billion in Q3, up from $7.0 billion a year earlier."
+                        ],
+                        "ticker": "AMZN",
+                    },
+                },
+            }
+        )
+        assert resp_eval is not None
+        assert resp_eval["result"]["isError"] is False
+        eval_metrics = json.loads(resp_eval["result"]["content"][0]["text"])
+        assert eval_metrics["faithfulness_score"] >= 0.85
+        assert eval_metrics["overall_pass"] is True
+
+        # 2. Verify Feature Store was populated through integration handler
+        q_records = feature_store.read_records(group=FeatureGroup.QUERY)
+        e_records = feature_store.read_records(group=FeatureGroup.EVALUATION)
+        assert len(q_records) >= 1
+        assert len(e_records) >= 1
+        assert q_records[0].features["has_question_mark"] is True
+        assert e_records[0].features["overall_pass"] is True
+
+        # 3. Verify Telemetry collector recorded evaluation
+        telem_summary = telemetry_collector.export_summary()
+        assert telem_summary["total_evaluations"] == 1
+        assert telem_summary["avg_faithfulness"] >= 0.85
+
+        # 4. Read exposed health & summary resources
+        res_summary = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": "integ-2",
+                "method": "resources/read",
+                "params": {"uri": "rag://evaluations/summary"},
+            }
+        )
+        assert res_summary is not None
+        summary_obj = json.loads(res_summary["result"]["contents"][0]["text"])
+        assert "default_thresholds" in summary_obj
+
+        # 5. Render prompt and verify integration consistency
+        prompt_rendered = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": "integ-3",
+                "method": "prompts/get",
+                "params": {
+                    "name": "sec_10k_verification",
+                    "arguments": {
+                        "ticker": "AMZN",
+                        "fiscal_year": "2024",
+                        "filing_excerpt": "AWS operating profit reached $10.4 billion.",
+                        "model_claim": "AWS operating profit was $10.4 billion in Q3.",
+                    },
+                },
+            }
+        )
+        assert prompt_rendered is not None
+        assert "AMZN" in prompt_rendered["result"]["messages"][0]["content"]["text"]

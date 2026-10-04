@@ -167,9 +167,7 @@ query = RAGQuery(
     query_id="q1",
     query_text="What were Apple's fiscal year 2024 net sales?",
     ticker="AAPL",
-    structured_targets=[
-        NumericalTarget(metric_name="Net Sales", target_value=391.0e9)
-    ],
+    structured_targets=[NumericalTarget(metric_name="Net Sales", target_value=391.0e9)],
 )
 
 # Generated model response

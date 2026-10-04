@@ -9,6 +9,7 @@ from production_rag_evaluation import (
     FeatureGroup,
     FinancialRiskEngine,
     HallucinationDetector,
+    MCPServer,
     MonteCarloStressTester,
     ParquetFeatureStore,
     RAGEvaluator,
@@ -16,6 +17,7 @@ from production_rag_evaluation import (
     SemanticCache,
     StreamingFeaturePipeline,
     __version__,
+    create_mcp_server,
 )
 from production_rag_evaluation.cli.main import cli
 from production_rag_evaluation.models.schemas import (
@@ -37,6 +39,8 @@ def test_package_metadata():
     assert FinancialRiskEngine is not None
     assert ParquetFeatureStore is not None
     assert StreamingFeaturePipeline is not None
+    assert MCPServer is not None
+    assert create_mcp_server is not None
 
 
 def test_schemas_instantiation(sample_chunk_apple: DocumentChunk):
@@ -285,3 +289,104 @@ def test_feature_store_and_streaming_pipeline(tmp_path, sample_chunk_apple: Docu
     assert store.count_records() == 2
     summary = store.storage_summary()
     assert summary["total_records"] == 2
+
+
+def test_mcp_scaffold_lifecycle(sample_chunk_apple: DocumentChunk):
+    """Verify MCP server initialization, tool dispatch, resource reading, and prompt rendering."""
+    import json
+
+    from production_rag_evaluation.mcp import (
+        MCPConfig,
+        MCPTransport,
+        create_mcp_server,
+    )
+
+    config = MCPConfig(
+        server_name="test-rag-mcp",
+        server_version="0.1.0",
+        transport=MCPTransport.STDIO,
+    )
+    server = create_mcp_server(config)
+
+    # Handshake
+    init_resp = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "req-1",
+            "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05"},
+        }
+    )
+    assert init_resp is not None
+    assert init_resp["result"]["serverInfo"]["name"] == "test-rag-mcp"
+    assert "tools" in init_resp["result"]["capabilities"]
+
+    # Tool listing
+    tools_resp = server.handle_request({"jsonrpc": "2.0", "id": "req-2", "method": "tools/list"})
+    assert tools_resp is not None
+    tool_names = [t["name"] for t in tools_resp["result"]["tools"]]
+    assert "rag_evaluate" in tool_names
+    assert "rag_detect_hallucinations" in tool_names
+    assert "rag_risk_metrics" in tool_names
+    assert "rag_stress_test" in tool_names
+
+    # Tool execution - rag_evaluate
+    eval_call = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "req-3",
+            "method": "tools/call",
+            "params": {
+                "name": "rag_evaluate",
+                "arguments": {
+                    "query_text": "What were net sales?",
+                    "generated_answer": "Apple reported net sales of $391.0 billion.",
+                    "context_chunks": [sample_chunk_apple.text],
+                    "ticker": "AAPL",
+                },
+            },
+        }
+    )
+    assert eval_call is not None
+    assert not eval_call["result"]["isError"]
+    eval_data = json.loads(eval_call["result"]["content"][0]["text"])
+    assert eval_data["faithfulness_score"] >= 0.8
+    assert eval_data["overall_pass"] is True
+
+    # Resource listing and reading
+    res_list = server.handle_request({"jsonrpc": "2.0", "id": "req-4", "method": "resources/list"})
+    assert res_list is not None
+    uris = [r["uri"] for r in res_list["result"]["resources"]]
+    assert "rag://system/health" in uris
+
+    res_read = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "req-5",
+            "method": "resources/read",
+            "params": {"uri": "rag://system/health"},
+        }
+    )
+    assert res_read is not None
+    health_payload = json.loads(res_read["result"]["contents"][0]["text"])
+    assert health_payload["status"] == "HEALTHY"
+
+    # Prompt rendering
+    prompt_get = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "req-6",
+            "method": "prompts/get",
+            "params": {
+                "name": "earnings_call_audit",
+                "arguments": {
+                    "company": "Apple Inc.",
+                    "quarter": "Q4 2024",
+                    "transcript_segment": sample_chunk_apple.text,
+                    "generated_summary": "Net sales hit $391.0 billion.",
+                },
+            },
+        }
+    )
+    assert prompt_get is not None
+    assert "Apple Inc." in prompt_get["result"]["messages"][0]["content"]["text"]

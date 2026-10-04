@@ -27,6 +27,11 @@ from production_rag_evaluation.features.store import ParquetFeatureStore
 from production_rag_evaluation.finance.metrics import FinancialRiskEngine
 from production_rag_evaluation.finance.stress_testing import MonteCarloStressTester
 from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
+from production_rag_evaluation.mcp.models import MCPConfig, MCPTransport
+from production_rag_evaluation.mcp.prompts import get_default_prompt_registry
+from production_rag_evaluation.mcp.resources import get_default_resource_registry
+from production_rag_evaluation.mcp.server import create_mcp_server
+from production_rag_evaluation.mcp.tools import get_default_tool_registry
 from production_rag_evaluation.models.schemas import (
     DocumentChunk,
     DocumentType,
@@ -971,7 +976,186 @@ def feature_store_list_schemas_cmd(group: Optional[str], json_out: bool) -> None
                 "[yellow]Yes[/yellow]" if feat.nullable else "[green]No[/green]",
                 feat.description or "-",
             )
-        console.print(table)
+    console.print(table)
+
+
+# -------------------------------------------------------------------------
+# 9. MCP SERVER & TOOLS COMMAND GROUP
+# -------------------------------------------------------------------------
+@cli.group(name="mcp")
+def mcp_group() -> None:
+    """Manage and inspect Model Context Protocol (MCP) server, tools, and resources."""
+    pass
+
+
+@mcp_group.command(name="serve")
+@click.option(
+    "--transport",
+    "-t",
+    type=click.Choice(["stdio", "sse", "http"], case_sensitive=False),
+    default="stdio",
+    help="MCP transport protocol mode (default: stdio).",
+)
+@click.option("--host", default="127.0.0.1", help="Host interface to bind network server.")
+@click.option("--port", "-p", type=int, default=8000, help="Port for network transport.")
+@click.option("--debug", is_flag=True, help="Enable verbose debug logging.")
+@click.option("--enable-sessions", is_flag=True, help="Enable session management and tracking.")
+def mcp_serve_cmd(
+    transport: str,
+    host: str,
+    port: int,
+    debug: bool,
+    enable_sessions: bool,
+) -> None:
+    """Start and run the production MCP server."""
+    cfg = MCPConfig(
+        transport=MCPTransport(transport.lower()),
+        host=host,
+        port=port,
+        debug=debug,
+        log_level="DEBUG" if debug else "INFO",
+    )
+    server = create_mcp_server(cfg, enable_session_handler=enable_sessions)
+    if cfg.transport == MCPTransport.STDIO:
+        server.run_stdio()
+    else:
+        click.echo(
+            f"Network transport '{cfg.transport.value}' initialized on {cfg.host}:{cfg.port}. Falling back to stdio dispatcher."
+        )
+        server.run_stdio()
+
+
+@mcp_group.command(name="list-tools")
+@click.option("--json-out", is_flag=True, help="Output raw JSON tool definitions.")
+def mcp_list_tools_cmd(json_out: bool) -> None:
+    """List all registered MCP tools and their execution schemas."""
+    tool_reg = get_default_tool_registry()
+    tools = tool_reg.list_tools()
+
+    if json_out:
+        click.echo(json.dumps(tools, indent=2))
+        return
+
+    table = Table(title=f"Registered MCP Tools ({len(tools)} available)")
+    table.add_column("Tool Name", style="bold cyan")
+    table.add_column("Description", style="white")
+    table.add_column("Parameters", style="yellow")
+
+    for t in tools:
+        props = list(t.get("inputSchema", {}).get("properties", {}).keys())
+        table.add_row(
+            t.get("name", ""),
+            t.get("description", ""),
+            ", ".join(props) if props else "-",
+        )
+
+    console.print(table)
+
+
+@mcp_group.command(name="list-resources")
+@click.option("--json-out", is_flag=True, help="Output raw JSON resource definitions.")
+def mcp_list_resources_cmd(json_out: bool) -> None:
+    """List all exposed MCP resources and templates."""
+    resource_reg = get_default_resource_registry()
+    resources = resource_reg.list_resources()
+
+    if json_out:
+        click.echo(json.dumps(resources, indent=2))
+        return
+
+    table = Table(title=f"Exposed MCP Resources ({len(resources)} available)")
+    table.add_column("URI", style="bold cyan", no_wrap=True)
+    table.add_column("Name", style="magenta")
+    table.add_column("MIME Type", style="yellow")
+    table.add_column("Description", style="white")
+
+    for r in resources:
+        table.add_row(
+            r.get("uri", ""),
+            r.get("name", ""),
+            r.get("mimeType", ""),
+            r.get("description", "-"),
+        )
+
+    console.print(table)
+
+
+@mcp_group.command(name="list-prompts")
+@click.option("--json-out", is_flag=True, help="Output raw JSON prompt definitions.")
+def mcp_list_prompts_cmd(json_out: bool) -> None:
+    """List all exposed MCP prompt templates and arguments."""
+    prompt_reg = get_default_prompt_registry()
+    prompts = prompt_reg.list_prompts()
+
+    if json_out:
+        click.echo(json.dumps(prompts, indent=2))
+        return
+
+    table = Table(title=f"Exposed MCP Prompt Templates ({len(prompts)} available)")
+    table.add_column("Prompt Name", style="bold cyan")
+    table.add_column("Description", style="white")
+    table.add_column("Arguments", style="yellow")
+
+    for p in prompts:
+        args = [arg.get("name", "") for arg in p.get("arguments", [])]
+        table.add_row(
+            p.get("name", ""),
+            p.get("description", ""),
+            ", ".join(args) if args else "-",
+        )
+
+    console.print(table)
+
+
+@mcp_group.command(name="call-tool")
+@click.option("--name", "-n", required=True, help="Tool name to invoke.")
+@click.option(
+    "--arguments",
+    "-a",
+    default="{}",
+    help="JSON string or @file containing tool parameters.",
+)
+@click.option("--json-out", is_flag=True, help="Output raw JSON result.")
+def mcp_call_tool_cmd(name: str, arguments: str, json_out: bool) -> None:
+    """Execute an MCP tool directly from the command line."""
+    raw_args = _read_text_or_file(arguments)
+    try:
+        parsed_args = json.loads(raw_args)
+    except json.JSONDecodeError as exc:
+        raise click.BadParameter(f"Invalid JSON in --arguments: {exc}") from exc
+
+    tool_reg = get_default_tool_registry()
+    tool = tool_reg.get(name)
+    if not tool:
+        raise click.BadParameter(
+            f"Unknown MCP tool '{name}'. Run 'rag-eval mcp list-tools' to view available tools."
+        )
+
+    result = tool_reg.call(name, parsed_args)
+
+    if json_out:
+        click.echo(result.model_dump_json(indent=2))
+        return
+
+    status_str = (
+        "[bold red]ERROR[/bold red]" if result.isError else "[bold green]SUCCESS[/bold green]"
+    )
+    table = Table(title=f"MCP Tool Execution: {name} ({status_str})")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value", style="magenta")
+
+    table.add_row("Tool", name)
+    table.add_row("Status", status_str)
+    for idx, c in enumerate(result.content):
+        val = c.get("text", "")
+        if len(val) > 120:
+            val = val[:117] + "..."
+        table.add_row(f"Content [{idx}]", val)
+
+    if result.metadata:
+        table.add_row("Metadata", json.dumps(result.metadata, indent=2))
+
+    console.print(table)
 
 
 @feature_store_group.command(name="compact")

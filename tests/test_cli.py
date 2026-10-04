@@ -697,3 +697,130 @@ class TestCLIFeatureStoreCommands:
             ],
         )
         assert res_batch.exit_code == 0
+
+
+class TestCLIMCPCommands:
+    """Validate MCP server and tools CLI command workflows."""
+
+    def test_mcp_list_tools(self, cli_runner: CliRunner) -> None:
+        res = cli_runner.invoke(cli, ["mcp", "list-tools"])
+        assert res.exit_code == 0
+        assert "Registered MCP Tools" in res.output
+        assert "rag_evaluate" in res.output
+        assert "rag_risk_metrics" in res.output
+
+        res_json = cli_runner.invoke(cli, ["mcp", "list-tools", "--json-out"])
+        assert res_json.exit_code == 0
+        tools = json.loads(res_json.output)
+        assert isinstance(tools, list)
+        tool_names = [t["name"] for t in tools]
+        assert "rag_evaluate" in tool_names
+        assert "rag_detect_hallucinations" in tool_names
+
+    def test_mcp_list_resources(self, cli_runner: CliRunner) -> None:
+        res = cli_runner.invoke(cli, ["mcp", "list-resources"])
+        assert res.exit_code == 0
+        assert "Exposed MCP Resources" in res.output
+        assert "rag://system/" in res.output
+
+        res_json = cli_runner.invoke(cli, ["mcp", "list-resources", "--json-out"])
+        assert res_json.exit_code == 0
+        resources = json.loads(res_json.output)
+        assert any(r["uri"] == "rag://system/health" for r in resources)
+
+    def test_mcp_list_prompts(self, cli_runner: CliRunner) -> None:
+        res = cli_runner.invoke(cli, ["mcp", "list-prompts"])
+        assert res.exit_code == 0
+        assert "Exposed MCP Prompt Templates" in res.output
+        assert "earnings_call_audit" in res.output
+
+        res_json = cli_runner.invoke(cli, ["mcp", "list-prompts", "--json-out"])
+        assert res_json.exit_code == 0
+        prompts = json.loads(res_json.output)
+        assert any(p["name"] == "earnings_call_audit" for p in prompts)
+
+    def test_mcp_call_tool(self, cli_runner: CliRunner, sample_chunk_apple: DocumentChunk) -> None:
+        args = {
+            "query_text": "What was Apple's total net sales?",
+            "generated_answer": "Apple reported net sales of $391.0 billion.",
+            "context_chunks": [sample_chunk_apple.text],
+            "ticker": "AAPL",
+        }
+        res = cli_runner.invoke(
+            cli,
+            [
+                "mcp",
+                "call-tool",
+                "--name",
+                "rag_evaluate",
+                "--arguments",
+                json.dumps(args),
+            ],
+        )
+        assert res.exit_code == 0
+        assert "MCP Tool Execution: rag_evaluate" in res.output
+        assert "SUCCESS" in res.output
+
+        res_json = cli_runner.invoke(
+            cli,
+            [
+                "mcp",
+                "call-tool",
+                "-n",
+                "rag_evaluate",
+                "-a",
+                json.dumps(args),
+                "--json-out",
+            ],
+        )
+        assert res_json.exit_code == 0
+        data = json.loads(res_json.output)
+        assert data["isError"] is False
+        assert len(data["content"]) > 0
+
+    def test_mcp_call_tool_errors(self, cli_runner: CliRunner) -> None:
+        # Invalid JSON
+        res_bad_json = cli_runner.invoke(
+            cli,
+            ["mcp", "call-tool", "--name", "rag_evaluate", "--arguments", "invalid-json"],
+        )
+        assert res_bad_json.exit_code != 0
+        assert "Invalid JSON" in res_bad_json.output
+
+        # Unknown tool
+        res_unknown = cli_runner.invoke(
+            cli,
+            ["mcp", "call-tool", "--name", "unknown_tool", "--arguments", "{}"],
+        )
+        assert res_unknown.exit_code != 0
+        assert "Unknown MCP tool" in res_unknown.output
+
+    def test_mcp_serve_stdio_and_network_mock(self, cli_runner: CliRunner) -> None:
+        from unittest.mock import MagicMock, patch
+
+        with patch("production_rag_evaluation.cli.main.create_mcp_server") as mock_create:
+            mock_server = MagicMock()
+            mock_create.return_value = mock_server
+
+            # stdio serve
+            res_stdio = cli_runner.invoke(cli, ["mcp", "serve", "--transport", "stdio"])
+            assert res_stdio.exit_code == 0
+            mock_server.run_stdio.assert_called_once()
+
+            # http/sse serve fallback to stdio dispatcher
+            res_http = cli_runner.invoke(
+                cli,
+                [
+                    "mcp",
+                    "serve",
+                    "--transport",
+                    "http",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "9000",
+                    "--debug",
+                ],
+            )
+            assert res_http.exit_code == 0
+            assert "Network transport 'http' initialized" in res_http.output

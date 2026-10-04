@@ -11,6 +11,7 @@ Covers:
 import time
 
 import numpy as np
+import pytest
 
 from production_rag_evaluation.core.cache import SemanticCache
 from production_rag_evaluation.core.evaluator import RAGEvaluator
@@ -417,3 +418,193 @@ class TestStressTestingAndTelemetryEdgeCases:
         res = collector.detect_drift(baseline_size=20, test_size=10)
         assert res["drift_detected"] is False
         assert "Insufficient data points" in res["reason"]
+
+
+class TestMCPEdgeCases:
+    """Edge cases for MCP tools, registries, and server communication."""
+
+    def test_mcp_call_tool_missing_required_args(self) -> None:
+        from production_rag_evaluation.mcp.tools import get_default_tool_registry
+
+        reg = get_default_tool_registry()
+
+        # rag_evaluate missing query_text
+        res_eval = reg.call(
+            "rag_evaluate",
+            {"generated_answer": "test", "context_chunks": ["c1"]},
+        )
+        assert res_eval.isError is True
+        assert "Missing required argument" in res_eval.content[0]["text"]
+
+        # rag_risk_metrics missing returns
+        res_risk = reg.call("rag_risk_metrics", {})
+        assert res_risk.isError is True
+        assert (
+            "Missing required argument" in res_risk.content[0]["text"]
+            or "Invalid arguments" in res_risk.content[0]["text"]
+        )
+
+        # rag_stress_test missing returns
+        res_stress = reg.call("rag_stress_test", {})
+        assert res_stress.isError is True
+        assert (
+            "Missing required argument" in res_stress.content[0]["text"]
+            or "Invalid arguments" in res_stress.content[0]["text"]
+        )
+
+        # rag_cache_lookup GET missing query_text
+        res_cache = reg.call("rag_cache_lookup", {"action": "GET"})
+        assert "query_text is required for cache lookup" in res_cache.content[0]["text"]
+
+    def test_mcp_call_tool_malformed_argument_types(self) -> None:
+        from production_rag_evaluation.mcp.tools import get_default_tool_registry
+
+        reg = get_default_tool_registry()
+
+        # non-array returns
+        res = reg.call("rag_risk_metrics", {"returns": "not-an-array"})
+        assert res.isError is True
+        assert "must be an array" in res.content[0]["text"]
+
+        # invalid numerical returns values
+        res_invalid = reg.call("rag_risk_metrics", {"returns": ["abc", "xyz"]})
+        assert res_invalid.isError is True
+        assert (
+            "could not convert" in res_invalid.content[0]["text"]
+            or "Invalid return series" in res_invalid.content[0]["text"]
+        )
+
+    def test_mcp_server_protocol_invalid_rpc(self) -> None:
+        import json
+
+        from production_rag_evaluation.mcp.server import create_mcp_server
+
+        server = create_mcp_server()
+
+        # Non-JSON string message
+        raw = server.handle_message("not-json")
+        assert raw is not None
+        parsed = json.loads(raw)
+        assert parsed["error"]["code"] == -32700
+
+        # Method not found
+        res = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": "err-1",
+                "method": "non_existent_rpc_method",
+            }
+        )
+        assert res is not None
+        assert res["error"]["code"] == -32601
+
+        # tools/call with missing tool name
+        call_missing_name = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": "err-2",
+                "method": "tools/call",
+                "params": {"name": "non_existent_tool_xyz", "arguments": {}},
+            }
+        )
+        assert call_missing_name is not None
+        assert call_missing_name["result"]["isError"] is True
+
+        # prompts/get unknown prompt
+        prompt_missing = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": "err-3",
+                "method": "prompts/get",
+                "params": {"name": "unknown_prompt"},
+            }
+        )
+        assert prompt_missing is not None
+        assert prompt_missing["error"]["code"] == -32602
+
+    def test_mcp_session_handler_edge_cases(self) -> None:
+        from production_rag_evaluation.mcp.handlers import MCPSessionHandler
+
+        handler = MCPSessionHandler(auth_token="secret-token-123", session_ttl_seconds=0.1)
+
+        # Invalid auth token
+        sess_invalid = handler.create_session({"name": "client-1"}, auth_token="wrong-token")
+        assert handler.validate_session(sess_invalid.session_id) is False
+
+        # Valid session creation
+        sess = handler.create_session({"name": "client-1"}, auth_token="secret-token-123")
+        assert handler.get_session(sess.session_id) is not None
+        assert handler.validate_session(sess.session_id) is True
+
+        # Non-existent session
+        assert handler.get_session("non-existent-session-id") is None
+        assert handler.validate_session("non-existent-session-id") is False
+        assert handler.touch_session("non-existent-session-id") is False
+
+        # Session expiry
+        time.sleep(0.15)
+        assert handler.validate_session(sess.session_id) is False
+
+    def test_mcp_notification_dispatcher_edge_cases(self) -> None:
+        from production_rag_evaluation.mcp.handlers import MCPNotificationDispatcher
+
+        dispatcher = MCPNotificationDispatcher()
+
+        # Unsubscribing callback not subscribed
+        def dummy_cb(topic, payload):
+            pass
+
+        dispatcher.unsubscribe("non_existent_topic", dummy_cb)
+        assert dispatcher.get_subscribers_count("non_existent_topic") == 0
+
+        # Publishing to empty topic
+        dispatched = dispatcher.publish("empty_topic", {"key": "val"})
+        assert dispatched == 0
+
+    def test_mcp_resource_registry_edge_cases(self) -> None:
+        from production_rag_evaluation.mcp.models import MCPResource
+        from production_rag_evaluation.mcp.resources import MCPResourceRegistry
+
+        reg = MCPResourceRegistry()
+
+        # Non-existent resource read
+        with pytest.raises(KeyError):
+            reg.read("rag://nonexistent/uri")
+
+        # Provider raising error
+        def faulty_provider():
+            raise ValueError("Resource generation failure")
+
+        res_faulty = MCPResource(uri="rag://test/faulty", name="faulty")
+        reg.register(res_faulty, provider=faulty_provider)
+
+        with pytest.raises(ValueError):
+            reg.read("rag://test/faulty")
+
+    def test_mcp_prompt_registry_edge_cases(self) -> None:
+        from production_rag_evaluation.mcp.prompts import MCPPromptRegistry
+
+        reg = MCPPromptRegistry()
+
+        # Rendering non-existent prompt
+        with pytest.raises(KeyError):
+            reg.render("non_existent_prompt", {})
+
+    def test_mcp_tools_boundary_conditions(self) -> None:
+        from production_rag_evaluation.mcp.tools import get_default_tool_registry
+
+        reg = get_default_tool_registry()
+
+        # rag_stress_test with non-array returns
+        res_non_array = reg.call("rag_stress_test", {"returns": "not-array"})
+        assert res_non_array.isError is True
+        assert "Argument 'returns' must be an array" in res_non_array.content[0]["text"]
+
+        # rag_cache_lookup with CLEAR and STATS actions
+        res_stats = reg.call("rag_cache_lookup", {"action": "STATS"})
+        assert res_stats.isError is False
+        assert "stats" in res_stats.content[0]["text"]
+
+        res_clear = reg.call("rag_cache_lookup", {"action": "CLEAR"})
+        assert res_clear.isError is False
+        assert "CLEAR" in res_clear.content[0]["text"]

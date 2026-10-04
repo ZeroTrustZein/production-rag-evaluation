@@ -131,7 +131,17 @@ jobs:
           python -c "import production_rag_evaluation; print('Installed version:', production_rag_evaluation.__version__)"
           production-rag-eval --help
           rag-eval --help
+          production-rag-eval evaluate --help
+          production-rag-eval batch-evaluate --help
+          production-rag-eval audit --help
+          production-rag-eval detect-hallucinations --help
           production-rag-eval risk-metrics --help
           production-rag-eval stress-test --help
-          production-rag-eval audit --help
           production-rag-eval telemetry --help
+          production-rag-eval cache --help
+          production-rag-eval feature-store --help
+          production-rag-eval mcp --help
+          production-rag-eval mcp list-tools --json-out
+          production-rag-eval mcp list-resources --json-out
+          production-rag-eval mcp list-prompts --json-out
+          rag-mcp-server --help

@@ -21,6 +21,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "networkx>=3.0.0",
     "pyarrow>=14.0.0",
+    "mcp>=1.2.0",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,7 @@ dev = [
 [project.scripts]
 production-rag-eval = "production_rag_evaluation.cli.main:cli"
 rag-eval = "production_rag_evaluation.cli.main:cli"
+rag-mcp-server = "production_rag_evaluation.mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

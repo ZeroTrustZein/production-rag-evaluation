@@ -266,6 +266,10 @@ class FeatureRegistryProtocol(Protocol):
         """Retrieve schema for a feature group."""
         ...
 
+    def list_definitions(self, group: Optional[Any] = None) -> List[Any]:
+        """List registered feature definitions."""
+        ...
+
     def validate_record(self, record: Any, strict: bool = False) -> Any:
         """Validate a feature record against registered schema."""
         ...
@@ -329,4 +333,122 @@ class FeatureDriftDetectorProtocol(Protocol):
         psi_threshold: float = 0.25,
     ) -> Any:
         """Detect distribution shift for a specific feature."""
+        ...
+
+
+@runtime_checkable
+class MCPServerProtocol(Protocol):
+    """Contract for Model Context Protocol (MCP) server dispatcher."""
+
+    def handle_request(self, request_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Process an inbound JSON-RPC request."""
+        ...
+
+    def run_stdio(self) -> None:
+        """Run server loop over standard input/output streams."""
+        ...
+
+
+@runtime_checkable
+class MCPToolRegistryProtocol(Protocol):
+    """Contract for MCP tool registration and invocation."""
+
+    def register(self, tool: Any) -> None:
+        """Register a new tool definition."""
+        ...
+
+    def get(self, name: str) -> Optional[Any]:
+        """Retrieve tool definition by name."""
+        ...
+
+    def list_tools(self) -> List[Dict[str, Any]]:
+        """Return all registered tools formatted per MCP specification."""
+        ...
+
+    def call(self, name: str, arguments: Dict[str, Any]) -> Any:
+        """Dispatch a tool call by name with provided arguments."""
+        ...
+
+
+@runtime_checkable
+class MCPResourceRegistryProtocol(Protocol):
+    """Contract for MCP resource registration and retrieval."""
+
+    def register(
+        self,
+        resource: Any,
+        provider: Optional[Any] = None,
+    ) -> None:
+        """Register a resource representation and optional dynamic provider."""
+        ...
+
+    def get(self, uri: str) -> Optional[Any]:
+        """Fetch static resource record by URI."""
+        ...
+
+    def list_resources(self) -> List[Dict[str, Any]]:
+        """Return resources formatted per MCP specification."""
+        ...
+
+    def read(self, uri: str) -> Dict[str, Any]:
+        """Resolve resource payload and return MCP contents structure."""
+        ...
+
+
+@runtime_checkable
+class MCPPromptRegistryProtocol(Protocol):
+    """Contract for MCP prompt template management."""
+
+    def register(self, prompt: Any) -> None:
+        """Register a new MCP prompt template."""
+        ...
+
+    def get(self, name: str) -> Optional[Any]:
+        """Fetch prompt definition by name."""
+        ...
+
+    def list_prompts(self) -> List[Dict[str, Any]]:
+        """Return prompts formatted per MCP specification."""
+        ...
+
+    def render(self, name: str, arguments: Dict[str, str]) -> Dict[str, Any]:
+        """Render prompt arguments into MCP messages response."""
+        ...
+
+
+@runtime_checkable
+class MCPIntegrationHandlerProtocol(Protocol):
+    """Contract for MCP integration pipeline with telemetry and storage."""
+
+    def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+        """Execute tool with telemetry tracking."""
+        ...
+
+    def dispatch_jsonrpc(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Dispatch JSON-RPC request with telemetry tracking."""
+        ...
+
+    def get_execution_stats(self) -> Dict[str, Any]:
+        """Return aggregate execution telemetry."""
+        ...
+
+
+@runtime_checkable
+class MCPSessionHandlerProtocol(Protocol):
+    """Contract for MCP client session state and authentication."""
+
+    def create_session(
+        self,
+        client_info: Optional[Dict[str, Any]] = None,
+        auth_token: Optional[str] = None,
+    ) -> Any:
+        """Create and track an active client session."""
+        ...
+
+    def validate_session(self, session_id: str) -> bool:
+        """Verify whether session exists and is active."""
+        ...
+
+    def close_session(self, session_id: str) -> bool:
+        """Terminate an active session."""
         ...

@@ -5,6 +5,8 @@ Covers FinancialRiskEngine, MonteCarloStressTester, and RiskTelemetryCollector.
 
 from __future__ import annotations
 
+from typing import Any, Dict, List
+
 import numpy as np
 import pytest
 
@@ -830,3 +832,463 @@ class TestFeatureStoreSubsystems:
         assert len(alerts) == 1
         assert "Feature drift detected" in alerts[0].message
         assert len(received) == 1
+
+
+class TestMCPSubsystems:
+    """Rigorous evaluation of MCP Server, Tool/Resource/Prompt Registries, and Integration Handlers."""
+
+    @pytest.fixture
+    def populated_feature_store(self, tmp_path):
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+
+        return ParquetFeatureStore(base_path=tmp_path / "mcp_fs_subsystem")
+
+    def test_protocol_conformity(self) -> None:
+        from production_rag_evaluation.mcp import (
+            MCPIntegrationHandler,
+            MCPPromptRegistry,
+            MCPResourceRegistry,
+            MCPServer,
+            MCPSessionHandler,
+            MCPToolRegistry,
+        )
+        from production_rag_evaluation.models.interfaces import (
+            MCPIntegrationHandlerProtocol,
+            MCPPromptRegistryProtocol,
+            MCPResourceRegistryProtocol,
+            MCPServerProtocol,
+            MCPSessionHandlerProtocol,
+            MCPToolRegistryProtocol,
+        )
+
+        server = MCPServer()
+        assert isinstance(server, MCPServerProtocol)
+
+        tool_reg = MCPToolRegistry()
+        assert isinstance(tool_reg, MCPToolRegistryProtocol)
+
+        res_reg = MCPResourceRegistry()
+        assert isinstance(res_reg, MCPResourceRegistryProtocol)
+
+        prompt_reg = MCPPromptRegistry()
+        assert isinstance(prompt_reg, MCPPromptRegistryProtocol)
+
+        session_mgr = MCPSessionHandler()
+        assert isinstance(session_mgr, MCPSessionHandlerProtocol)
+
+        integ = MCPIntegrationHandler()
+        assert isinstance(integ, MCPIntegrationHandlerProtocol)
+
+    def test_server_lifecycle_and_handshake(self) -> None:
+        from production_rag_evaluation.mcp import (
+            MCPConfig,
+            create_mcp_server,
+        )
+
+        server = create_mcp_server(MCPConfig(server_name="unit-mcp", server_version="1.2.3"))
+
+        # Initialize
+        init_res = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 101,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "clientInfo": {"name": "test-client", "version": "1.0"},
+                },
+            }
+        )
+        assert init_res is not None
+        assert init_res["id"] == 101
+        assert init_res["result"]["serverInfo"]["name"] == "unit-mcp"
+        assert init_res["result"]["serverInfo"]["version"] == "1.2.3"
+        assert "tools" in init_res["result"]["capabilities"]
+
+        # Notification: initialized
+        notif_res = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+            }
+        )
+        assert notif_res is None
+        assert server._is_initialized is True
+
+        # Ping
+        ping_res = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 102,
+                "method": "ping",
+            }
+        )
+        assert ping_res is not None
+        assert ping_res["result"] == {}
+
+    def test_server_jsonrpc_error_handling(self) -> None:
+        import json
+
+        from production_rag_evaluation.mcp import MCPServer
+
+        server = MCPServer()
+
+        # Parse Error (-32700)
+        parse_err_raw = server.handle_message("{not-valid-json")
+        assert parse_err_raw is not None
+        parse_err = json.loads(parse_err_raw)
+        assert parse_err["error"]["code"] == -32700
+
+        # Invalid Request (-32600)
+        invalid_req = server.handle_request({"not_a_method": True})
+        assert invalid_req is not None
+        assert invalid_req["error"]["code"] == -32600
+
+        # Method Not Found (-32601)
+        missing_method = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 201,
+                "method": "unsupported/method",
+            }
+        )
+        assert missing_method is not None
+        assert missing_method["error"]["code"] == -32601
+
+        # Invalid Params for tools/call (-32602)
+        invalid_params = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 202,
+                "method": "tools/call",
+                "params": {},
+            }
+        )
+        assert invalid_params is not None
+        assert invalid_params["error"]["code"] == -32602
+
+    def test_server_batch_and_notifications(self) -> None:
+        import json
+
+        from production_rag_evaluation.mcp import MCPServer
+
+        server = MCPServer()
+
+        # Batch request containing 2 calls and 1 notification
+        batch_msg = json.dumps(
+            [
+                {"jsonrpc": "2.0", "id": 1, "method": "ping"},
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            ]
+        )
+        raw_res = server.handle_message(batch_msg)
+        assert raw_res is not None
+        res_list = json.loads(raw_res)
+        assert isinstance(res_list, list)
+        assert len(res_list) == 2
+        assert res_list[0]["id"] == 1
+        assert res_list[1]["id"] == 2
+
+    def test_tool_registry_subsystem(self) -> None:
+        from production_rag_evaluation.mcp import (
+            MCPTool,
+            MCPToolRegistry,
+            ToolCallResult,
+            ToolParameter,
+        )
+
+        registry = MCPToolRegistry()
+
+        # Custom tool with parameters
+        custom_tool = MCPTool(
+            name="custom_calculator",
+            description="Adds two integers",
+            parameters=[
+                ToolParameter(name="a", type="integer", description="First num", required=True),
+                ToolParameter(name="b", type="integer", description="Second num", required=True),
+            ],
+            handler=lambda args: ToolCallResult(
+                content=[{"type": "text", "text": str(args["a"] + args["b"])}]
+            ),
+        )
+        registry.register(custom_tool)
+
+        assert registry.get("custom_calculator") is not None
+        listed = registry.list_tools()
+        assert any(t["name"] == "custom_calculator" for t in listed)
+
+        # Call success
+        res = registry.call("custom_calculator", {"a": 15, "b": 27})
+        assert res.isError is False
+        assert res.content[0]["text"] == "42"
+
+        # Missing tool
+        missing_res = registry.call("non_existent_tool", {})
+        assert missing_res.isError is True
+        assert "not found" in missing_res.content[0]["text"]
+
+        # Tool without handler
+        tool_no_handler = MCPTool(name="no_op", description="Does nothing")
+        registry.register(tool_no_handler)
+        no_h_res = registry.call("no_op", {})
+        assert no_h_res.isError is True
+        assert "no execution handler" in no_h_res.content[0]["text"]
+
+        # Handler raising exception
+        def failing_handler(args):
+            raise RuntimeError("Underlying subsystem failure")
+
+        tool_fail = MCPTool(
+            name="failing_tool", description="Always fails", handler=failing_handler
+        )
+        registry.register(tool_fail)
+        fail_res = registry.call("failing_tool", {})
+        assert fail_res.isError is True
+        assert "Underlying subsystem failure" in fail_res.content[0]["text"]
+
+    def test_resource_registry_subsystem(self) -> None:
+        from production_rag_evaluation.mcp import (
+            MCPResource,
+            MCPResourceRegistry,
+            get_default_resource_registry,
+        )
+
+        reg = get_default_resource_registry()
+        resources = reg.list_resources()
+        uris = [r["uri"] for r in resources]
+        assert "rag://system/health" in uris
+        assert "rag://features/schema" in uris
+        assert "rag://finance/scenarios" in uris
+        assert "rag://evaluations/summary" in uris
+
+        # Read static and dynamic resources
+        health_data = reg.read("rag://system/health")
+        assert health_data["contents"][0]["uri"] == "rag://system/health"
+        assert "HEALTHY" in health_data["contents"][0]["text"]
+
+        summary_data = reg.read("rag://evaluations/summary")
+        assert summary_data["contents"][0]["uri"] == "rag://evaluations/summary"
+
+        # Custom resource and dynamic provider
+        custom_reg = MCPResourceRegistry()
+        custom_res = MCPResource(
+            uri="custom://data/version",
+            name="version",
+            description="App version",
+        )
+        custom_reg.register(custom_res, provider=lambda: "v2.0.1")
+        resolved = custom_reg.read("custom://data/version")
+        assert resolved["contents"][0]["text"] == "v2.0.1"
+
+        # Non-existent resource
+        with pytest.raises(KeyError):
+            custom_reg.read("custom://missing")
+
+    def test_prompt_registry_subsystem(self) -> None:
+        from production_rag_evaluation.mcp import (
+            get_default_prompt_registry,
+        )
+
+        reg = get_default_prompt_registry()
+        prompts = reg.list_prompts()
+        names = [p["name"] for p in prompts]
+        assert "earnings_call_audit" in names
+        assert "sec_10k_verification" in names
+        assert "portfolio_risk_audit" in names
+
+        # Render earnings call audit
+        rendered = reg.render(
+            "earnings_call_audit",
+            {
+                "company": "NVIDIA",
+                "quarter": "Q3-2026",
+                "transcript_segment": "Revenue grew 94%.",
+                "generated_summary": "Summary of Q3-2026 revenue growth.",
+            },
+        )
+        assert len(rendered["messages"]) == 1
+        msg = rendered["messages"][0]
+        assert msg["role"] == "user"
+        assert "NVIDIA" in msg["content"]["text"]
+        assert "Q3-2026" in msg["content"]["text"]
+
+        # Missing required argument
+        with pytest.raises(ValueError) as exc:
+            reg.render("earnings_call_audit", {"quarter": "Q3-2026"})
+        assert "Missing required prompt argument 'company'" in str(exc.value)
+
+        # Unregistered prompt
+        with pytest.raises(KeyError):
+            reg.render("unknown_prompt", {})
+
+    def test_session_handler_subsystem(self) -> None:
+        from production_rag_evaluation.mcp.handlers import MCPSessionHandler
+
+        handler = MCPSessionHandler(auth_token="secret-token-123", session_ttl_seconds=2.0)
+
+        # Unauthorized session
+        unauth_session = handler.create_session(
+            client_info={"client": "test"}, auth_token="wrong-token"
+        )
+        assert unauth_session.is_authenticated is False
+        assert handler.validate_session(unauth_session.session_id) is False
+
+        # Authorized session
+        auth_session = handler.create_session(
+            client_info={"client": "valid"}, auth_token="secret-token-123"
+        )
+        assert auth_session.is_authenticated is True
+        assert handler.validate_session(auth_session.session_id) is True
+
+        # Activity touch
+        assert auth_session.request_count == 0
+        handler.touch_session(auth_session.session_id)
+        assert auth_session.request_count == 1
+
+        # Listing active sessions
+        active = handler.list_active_sessions()
+        assert len(active) == 1
+        assert active[0].session_id == auth_session.session_id
+
+        # Close session
+        closed = handler.close_session(auth_session.session_id)
+        assert closed is True
+        assert handler.get_session(auth_session.session_id) is None
+
+    def test_notification_dispatcher_subsystem(self) -> None:
+        from production_rag_evaluation.mcp.handlers import MCPNotificationDispatcher
+
+        dispatcher = MCPNotificationDispatcher()
+        received_specific: List[Dict[str, Any]] = []
+        received_wildcard: List[Dict[str, Any]] = []
+
+        def specific_cb(topic: str, payload: Dict[str, Any]) -> None:
+            received_specific.append(payload)
+
+        def wildcard_cb(topic: str, payload: Dict[str, Any]) -> None:
+            received_wildcard.append(payload)
+
+        dispatcher.subscribe("alerts", specific_cb)
+        dispatcher.subscribe("*", wildcard_cb)
+
+        assert dispatcher.get_subscribers_count("alerts") == 1
+        assert dispatcher.get_subscribers_count("*") == 1
+
+        dispatched_count = dispatcher.publish("alerts", {"level": "CRITICAL", "metric": "drift"})
+        assert dispatched_count == 2
+        assert len(received_specific) == 1
+        assert len(received_wildcard) == 1
+
+        # Unsubscribe
+        dispatcher.unsubscribe("alerts", specific_cb)
+        assert dispatcher.get_subscribers_count("alerts") == 0
+        dispatcher.publish("alerts", {"level": "INFO"})
+        assert len(received_specific) == 1
+        assert len(received_wildcard) == 2
+
+    def test_integration_handler_telemetry_flow(self) -> None:
+        from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
+        from production_rag_evaluation.mcp.handlers import MCPIntegrationHandler
+
+        collector = RiskTelemetryCollector()
+        handler = MCPIntegrationHandler(telemetry_collector=collector)
+
+        # Invoke rag_evaluate
+        res = handler.execute_tool(
+            "rag_evaluate",
+            {
+                "query_text": "What was MSFT revenue?",
+                "generated_answer": "Microsoft reported revenue of $65.6 billion.",
+                "context_chunks": [
+                    {
+                        "chunk_id": "c1",
+                        "content": "Microsoft reported revenue of $65.6 billion.",
+                        "document_id": "msft-10q",
+                    }
+                ],
+            },
+        )
+        assert res.isError is False
+        summary = collector.export_summary()
+        assert summary["total_evaluations"] == 1
+        assert summary["avg_faithfulness"] > 0.0
+
+    def test_integration_handler_feature_store_flow(self, populated_feature_store) -> None:
+        from production_rag_evaluation.features.models import FeatureGroup
+        from production_rag_evaluation.mcp.handlers import MCPIntegrationHandler
+
+        handler = MCPIntegrationHandler(feature_store=populated_feature_store)
+
+        res = handler.execute_tool(
+            "rag_evaluate",
+            {
+                "query_text": "What were the operating expenses?",
+                "generated_answer": "Operating expenses were $14.2 billion.",
+                "context_chunks": [
+                    {
+                        "chunk_id": "c2",
+                        "content": "Operating expenses were $14.2 billion for the quarter.",
+                        "document_id": "sec-doc",
+                    }
+                ],
+            },
+        )
+        assert res.isError is False
+
+        # Verify feature store records written
+        q_features = populated_feature_store.read_records(group=FeatureGroup.QUERY)
+        r_features = populated_feature_store.read_records(group=FeatureGroup.RESPONSE)
+        e_features = populated_feature_store.read_records(group=FeatureGroup.EVALUATION)
+
+        assert len(q_features) >= 1
+        assert len(r_features) >= 1
+        assert len(e_features) >= 1
+
+    def test_integration_handler_execution_stats(self) -> None:
+        from production_rag_evaluation.mcp.handlers import MCPIntegrationHandler
+
+        handler = MCPIntegrationHandler()
+
+        handler.execute_tool("rag_risk_metrics", {"returns": [0.01, 0.02, -0.01, 0.03]})
+        handler.execute_tool("rag_feature_stats", {})
+
+        stats = handler.get_execution_stats()
+        assert stats["total_invocations"] == 2
+        assert stats["total_errors"] == 0
+        assert "rag_risk_metrics" in stats["stats_by_tool"]
+        assert "rag_feature_stats" in stats["stats_by_tool"]
+        assert stats["stats_by_tool"]["rag_risk_metrics"]["call_count"] == 1
+
+        # Reset stats
+        handler.reset_stats()
+        empty_stats = handler.get_execution_stats()
+        assert empty_stats["total_invocations"] == 0
+        assert len(empty_stats["stats_by_tool"]) == 0
+
+    def test_integration_handler_batch_evaluation(self) -> None:
+        from production_rag_evaluation.mcp.handlers import MCPIntegrationHandler
+
+        handler = MCPIntegrationHandler()
+
+        items = [
+            {
+                "query_text": "What was the EBITDA?",
+                "generated_answer": "EBITDA was $5.2 billion.",
+                "context_chunks": [
+                    {"chunk_id": "c3", "content": "EBITDA was $5.2 billion.", "document_id": "d1"}
+                ],
+            },
+            {
+                "query_text": "What was the net margin?",
+                "generated_answer": "Net margin was 24%.",
+                "context_chunks": [
+                    {"chunk_id": "c4", "content": "Net margin reached 24%.", "document_id": "d2"}
+                ],
+            },
+        ]
+
+        batch_results = handler.handle_batch_evaluation(items, mode="FAST")
+        assert len(batch_results) == 2
+        assert "faithfulness_score" in batch_results[0]
+        assert "faithfulness_score" in batch_results[1]
