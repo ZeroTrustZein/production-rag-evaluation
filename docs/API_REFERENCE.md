@@ -17,6 +17,8 @@ Comprehensive reference for all public classes, functions, schemas, protocols, a
 - [9. Monte Carlo Stress Tester (`finance.stress_testing`)](#9-monte-carlo-stress-tester-financestress_testing)
 - [10. Risk Telemetry Collector (`finance.telemetry`)](#10-risk-telemetry-collector-financetelemetry)
 - [11. CLI Commands & Options (`cli.main`)](#11-cli-commands--options-climain)
+- [12. Feature Store & Streaming Pipeline (`production_rag_evaluation.features`)](#12-feature-store--streaming-pipeline-production_rag_evaluationfeatures)
+- [13. Model Context Protocol (MCP) Integration (`production_rag_evaluation.mcp`)](#13-model-context-protocol-mcp-integration-production_rag_evaluationmcp)
 
 ---
 
@@ -46,6 +48,47 @@ from production_rag_evaluation import (
     TelemetryReport,
     TelemetryAlert,
     BatchEvaluationSummary,
+    # Feature Store & Streaming Pipeline
+    ParquetFeatureStore,
+    StreamingFeaturePipeline,
+    FeatureRegistry,
+    FeatureDriftDetector,
+    EvaluationFeatureHandler,
+    FeatureCompactionHandler,
+    FeatureExportHandler,
+    FeatureRecord,
+    FeatureSchema,
+    FeatureDefinition,
+    FeatureGroup,
+    FeatureValueType,
+    OnlineFeatureVector,
+    FeatureDriftReport,
+    CompactionResult,
+    ExportFormat,
+    # Model Context Protocol (MCP)
+    MCPServer,
+    create_mcp_server,
+    MCPToolRegistry,
+    MCPResourceRegistry,
+    MCPPromptRegistry,
+    MCPSessionHandler,
+    MCPIntegrationHandler,
+    MCPNotificationDispatcher,
+    MCPConfig,
+    MCPTool,
+    ToolParameter,
+    ToolCallResult,
+    ToolExecutionStats,
+    MCPResource,
+    MCPPrompt,
+    MCPPromptArgument,
+    MCPPromptMessage,
+    MCPSession,
+    JSONRPCRequest,
+    JSONRPCResponse,
+    JSONRPCError,
+    MCPTransport,
+    MCPProtocolVersion,
     # Enumerations
     DocumentType,
     Severity,
@@ -499,6 +542,11 @@ CLI entry points: `rag-eval` or `production-rag-eval`.
 | `feature-store compact` | Compacts Parquet files, purges duplicates, and prunes TTL. |
 | `feature-store export` | Exports aligned multi-group training matrix (Parquet/CSV/Arrow). |
 | `feature-store drift` | Computes PSI drift reports and detects distribution shift. |
+| `mcp serve` | Launches JSON-RPC 2.0 MCP server over stdio or HTTP/SSE. |
+| `mcp list-tools` | Lists all registered MCP tools and their JSON input schemas. |
+| `mcp list-resources` | Lists all exposed virtual MCP resources and `rag://` URIs. |
+| `mcp list-prompts` | Lists all exposed parameterized financial audit prompt templates. |
+| `mcp call-tool` | Executes an MCP tool directly via CLI with arguments. |
 
 ---
 
@@ -696,3 +744,269 @@ Computes Population Stability Index (PSI) and monitors statistical drift across 
 - **`FeatureExportHandler(store: ParquetFeatureStore)`**:
   Generates point-in-time aligned offline datasets across groups for entity lists.
   - `export_dataset(entity_ids: List[str], output_path: Union[str, Path], format: ExportFormat = ExportFormat.PARQUET, groups: Optional[List[FeatureGroup]] = None) -> Path`
+
+---
+
+## 13. Model Context Protocol (MCP) Integration (`production_rag_evaluation.mcp`)
+
+Production MCP server implementation exposing evaluation pipelines, hallucination auditors, quantitative risk engines, and feature stores over JSON-RPC 2.0.
+
+### 13.1 Protocol Constants & Enums
+
+#### Constants
+- **`JSONRPC_VERSION: str = "2.0"`**: Standard JSON-RPC wire protocol specification version.
+- **`MCP_PROTOCOL_VERSION: str = "2024-11-05"`**: Negotiated Model Context Protocol version identifier.
+
+#### `MCPProtocolVersion` (Enum)
+Supported MCP protocol specification versions:
+- `V2024_11_05 = "2024-11-05"`
+
+#### `MCPTransport` (Enum)
+Transport communication mechanisms:
+- `STDIO = "stdio"`: Standard input/output transport for desktop clients and local CLI assistants.
+- `SSE = "sse"`: Server-Sent Events network transport for web clients.
+- `HTTP = "http"`: HTTP streaming and REST transport for distributed agents.
+
+---
+
+### 13.2 Configuration & Session Models
+
+#### `MCPConfig` (Pydantic Model)
+Runtime configuration settings for the MCP server:
+- `server_name: str`: Logical server identifier (default: `"production-rag-evaluation-mcp"`).
+- `server_version: str`: Semantic version string (default: `"0.1.0"`).
+- `transport: MCPTransport`: Transport mechanism (default: `MCPTransport.STDIO`).
+- `host: str`: Network interface IP (default: `"127.0.0.1"`).
+- `port: int`: Network listening port (default: `8000`).
+- `auth_token: Optional[str]`: Optional shared bearer token for request authentication.
+- `log_level: str`: Logging verbosity (`"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`).
+- `debug: bool`: Enable verbose JSON-RPC protocol trace logging (default: `False`).
+
+#### `MCPSession` (Pydantic Model)
+Active client connection session metadata:
+- `session_id: str`: Unique UUID identifying client session.
+- `client_info: Dict[str, Any]`: Metadata payload provided by client during handshake.
+- `protocol_version: str`: Negotiated protocol version string.
+- `is_authenticated: bool`: Whether session passed authentication.
+- `created_at: float`: Epoch timestamp when session was initialized.
+- `last_active_at: float`: Epoch timestamp of most recent client interaction.
+- `request_count: int`: Cumulative number of requests processed.
+
+#### `ToolExecutionStats` (Pydantic Model)
+Execution metrics and latency statistics for an individual MCP tool:
+- `tool_name: str`: Unique tool identifier.
+- `call_count: int`: Total number of times tool has been invoked.
+- `error_count: int`: Number of invocations that returned an error.
+- `total_latency_ms: float`: Cumulative execution duration across all calls.
+- `mean_latency_ms: float`: Average execution latency in milliseconds.
+- `last_executed_at: Optional[float]`: Timestamp of most recent invocation.
+
+---
+
+### 13.3 JSON-RPC 2.0 Wire Models
+
+#### `JSONRPCRequest` (Pydantic Model)
+- `jsonrpc: str`: Must be `"2.0"`.
+- `id: Optional[Union[str, int]]`: Unique request identifier (or `None` for notifications).
+- `method: str`: RPC method name (e.g., `"initialize"`, `"tools/list"`, `"tools/call"`).
+- `params: Optional[Dict[str, Any]]`: Method-specific argument payload.
+
+#### `JSONRPCResponse` (Pydantic Model)
+- `jsonrpc: str`: Must be `"2.0"`.
+- `id: Optional[Union[str, int]]`: Corresponding request identifier.
+- `result: Optional[Any]`: Successful result payload.
+- `error: Optional[JSONRPCError]`: Error payload if request failed.
+
+#### `JSONRPCError` (Pydantic Model)
+- `code: int`: Numeric JSON-RPC error code (-32700, -32600, -32601, -32602, -32603, -32002).
+- `message: str`: Human-readable error description.
+- `data: Optional[Any]`: Optional diagnostic details or traceback dictionary.
+
+---
+
+### 13.4 Tool Models & Registry (`mcp.tools`)
+
+#### `ToolParameter` (Pydantic Model)
+- `name: str`: Parameter key name.
+- `type: str`: JSON Schema data type (`"string"`, `"number"`, `"integer"`, `"boolean"`, `"array"`, `"object"`).
+- `description: str`: Explanatory text provided to the client LLM.
+- `required: bool`: Whether parameter is required (default: `True`).
+- `default: Optional[Any]`: Fallback value if omitted.
+
+#### `MCPTool` (Pydantic Model)
+- `name: str`: Tool name identifier.
+- `description: str`: Functional synopsis for model context.
+- `parameters: Optional[List[ToolParameter]]`: Optional parameter descriptors that auto-generate `inputSchema`.
+- `inputSchema: Dict[str, Any]`: JSON Schema specifying argument constraints.
+- `handler: Optional[Callable[..., Any]]`: Function executed when tool is called.
+
+#### `ToolCallResult` (Pydantic Model)
+- `content: List[Dict[str, Any]]`: List of content objects (e.g. `[{"type": "text", "text": "..."}]`).
+- `isError: bool`: Flag indicating runtime or validation failure.
+- `metadata: Dict[str, Any]`: Supplementary metrics, execution latency, or trace data.
+- **`text(text: str, is_error: bool = False, metadata: Optional[Dict[str, Any]] = None) -> ToolCallResult`** *(classmethod)*: Factory for text content results.
+- **`error(message: str, metadata: Optional[Dict[str, Any]] = None) -> ToolCallResult`** *(classmethod)*: Factory for error results.
+
+#### `MCPToolRegistry`
+Coordinates tool registration, discovery, and execution.
+- **`register(tool: MCPTool) -> None`**: Registers an `MCPTool` definition and handler.
+- **`get(name: str) -> Optional[MCPTool]`**: Retrieves tool by name.
+- **`list_tools() -> List[Dict[str, Any]]`**: Returns MCP-compliant tool specifications list.
+- **`call(name: str, arguments: Dict[str, Any]) -> ToolCallResult`**: Dispatches invocation to tool handler.
+- **`get_execution_stats(tool_name: Optional[str] = None) -> Union[Optional[ToolExecutionStats], Dict[str, ToolExecutionStats]]`**: Returns runtime execution statistics.
+
+#### Helper
+- **`get_default_tool_registry() -> MCPToolRegistry`**: Returns a pre-populated registry with all 6 standard tools:
+
+| Tool Name | Description | Key Arguments |
+| :--- | :--- | :--- |
+| **`rag_evaluate`** | Comprehensive RAG evaluation DAG. | `query_text`, `generated_answer`, `context_chunks`, `ticker`, `mode`, `numerical_targets` |
+| **`rag_detect_hallucinations`** | Ground-truth hallucination audit. | `generated_answer`, `context_chunks`, `numerical_tolerance_pct` |
+| **`rag_risk_metrics`** | Quantitative portfolio risk metrics. | `returns`, `benchmark_returns`, `risk_free_rate`, `frequency` |
+| **`rag_stress_test`** | Monte Carlo shock simulations. | `returns`, `num_simulations`, `scenario`, `confidence_interval` |
+| **`rag_feature_stats`** | Schema and Parquet storage metrics. | `feature_group`, `store_path` |
+| **`rag_cache_lookup`** | Semantic cache query and eviction. | `query_text`, `action` (`GET`, `STATS`, `CLEAR`) |
+
+---
+
+### 13.5 Resource Models & Registry (`mcp.resources`)
+
+#### `MCPResource` (Pydantic Model)
+- `uri: str`: Resource URI string conforming to `rag://` scheme.
+- `name: str`: Human-readable label.
+- `description: Optional[str]`: Semantic description.
+- `mimeType: Optional[str]`: MIME type indicator (default: `"application/json"`).
+
+#### `MCPResourceRegistry`
+Manages virtual resources and dynamic resource providers.
+- **`register(resource: MCPResource, provider: Optional[Callable[[], str]] = None) -> None`**: Registers resource with dynamic provider callback.
+- **`get(uri: str) -> Optional[MCPResource]`**: Retrieves resource metadata by URI.
+- **`list_resources() -> List[Dict[str, Any]]`**: Returns MCP-compliant resource descriptors.
+- **`read(uri: str) -> Dict[str, Any]`**: Invokes provider and returns `{"contents": [{"uri": uri, "mimeType": ..., "text": ...}]}`.
+
+#### Helper
+- **`get_default_resource_registry() -> MCPResourceRegistry`**: Returns pre-populated registry exposing standard resources:
+
+| Resource URI | Resource Name | MIME Type | Content Description |
+| :--- | :--- | :--- | :--- |
+| `rag://system/health` | System Health & Subsystem Status | `application/json` | Engine statuses, semantic cache memory, registered tools. |
+| `rag://features/schema` | Feature Store Catalog Schema | `application/json` | Registered feature groups and PyArrow column definitions. |
+| `rag://finance/scenarios` | Financial Stress Testing Scenarios | `application/json` | Shock scenario definitions (macro, liquidity, rates, fat tails). |
+| `rag://evaluations/summary` | Evaluation Thresholds & Policies | `application/json` | Production pass/fail thresholds and evaluation rigor modes. |
+
+---
+
+### 13.6 Prompt Models & Registry (`mcp.prompts`)
+
+#### `MCPPromptArgument` (Pydantic Model)
+- `name: str`: Argument placeholder name.
+- `description: Optional[str]`: Purpose of argument.
+- `required: bool`: Whether argument is mandatory.
+
+#### `MCPPromptMessage` (Pydantic Model)
+- `role: str`: Participant role (`"user"`, `"assistant"`, `"system"`).
+- `content: Union[Dict[str, Any], str]`: Message content payload.
+
+#### `MCPPrompt` (Pydantic Model)
+- `name: str`: Unique prompt identifier.
+- `description: str`: Operational summary of prompt intent.
+- `arguments: List[MCPPromptArgument]`: Accepted arguments for prompt rendering.
+- `template: Optional[str]`: Text template with `{argument}` format specifiers.
+
+#### `MCPPromptRegistry`
+Manages prompt templates and rendering.
+- **`register(prompt: MCPPrompt) -> None`**: Registers prompt definition.
+- **`get(name: str) -> Optional[MCPPrompt]`**: Retrieves prompt by name.
+- **`list_prompts() -> List[Dict[str, Any]]`**: Returns MCP-compliant prompt descriptors.
+- **`render(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]`**: Validates arguments, performs string interpolation, and returns `{"description": ..., "messages": [...]}`.
+
+#### Helper
+- **`get_default_prompt_registry() -> MCPPromptRegistry`**: Returns pre-populated registry with standard prompt workflows:
+  - **`earnings_call_audit`**: Full audit of quarterly transcript Q&A vs generated summary (`company`, `quarter`, `transcript_segment`, `generated_summary`).
+  - **`sec_10k_verification`**: Cross-examination of SEC 10-K filing excerpt vs model claim (`ticker`, `fiscal_year`, `filing_excerpt`, `model_claim`).
+  - **`portfolio_risk_audit`**: Institutional audit of portfolio VaR, drawdown, and stress tests (`portfolio_id`, `risk_metrics_json`, `stress_test_json`).
+
+---
+
+### 13.7 Server Dispatcher (`mcp.server`)
+
+#### Class: `MCPServer`
+Full-featured JSON-RPC 2.0 dispatcher for Model Context Protocol communication.
+
+```python
+MCPServer(
+    config: Optional[MCPConfig] = None,
+    tool_registry: Optional[MCPToolRegistry] = None,
+    resource_registry: Optional[MCPResourceRegistry] = None,
+    prompt_registry: Optional[MCPPromptRegistry] = None,
+)
+```
+
+#### Properties
+- **`session_handler: Optional[MCPSessionHandler]`**: Gets or sets active session handler.
+
+#### Methods
+- **`handle_request(request_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]`**:
+  Processes inbound parsed JSON-RPC request dictionary and returns structured response (or `None` for notifications). Handles `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, and `prompts/get`.
+- **`handle_message(raw_message: str) -> Optional[str]`**:
+  Parses raw JSON string, executes request (or batch requests), and serializes JSON-RPC response string.
+- **`run_stdio() -> None`**:
+  Starts continuous blocking I/O loop consuming newline-delimited requests from `sys.stdin` and writing serialized responses to `sys.stdout`.
+
+#### Factory Function
+```python
+create_mcp_server(
+    config: Optional[MCPConfig] = None,
+    tool_registry: Optional[MCPToolRegistry] = None,
+    resource_registry: Optional[MCPResourceRegistry] = None,
+    prompt_registry: Optional[MCPPromptRegistry] = None,
+    enable_session_handler: bool = False,
+) -> MCPServer
+```
+
+---
+
+### 13.8 Integration & Lifecycle Handlers (`mcp.handlers`)
+
+#### Class: `MCPSessionHandler`
+Manages client connections, heartbeats, and token authentication.
+- **`create_session(client_info: Optional[Dict[str, Any]] = None, auth_token: Optional[str] = None) -> MCPSession`**: Initializes a new tracked session.
+- **`get_session(session_id: str) -> Optional[MCPSession]`**: Looks up session by UUID.
+- **`record_activity(session_id: str) -> bool`**: Updates heartbeat timestamp and increments request counter.
+- **`terminate_session(session_id: str) -> bool`**: Closes and removes active session.
+- **`cleanup_expired_sessions() -> int`**: Purges sessions exceeding TTL.
+
+#### Class: `MCPNotificationDispatcher`
+In-memory publish-subscribe bus for asynchronous event delivery.
+- **`subscribe(topic: str, callback: Callable[[str, Dict[str, Any]], None]) -> None`**: Registers topic listener.
+- **`unsubscribe(topic: str, callback: Callable[[str, Dict[str, Any]], None]) -> None`**: Unregisters listener.
+- **`publish(topic: str, payload: Dict[str, Any]) -> int`**: Dispatches payload to subscribers (returns count).
+- **`get_subscribers_count(topic: str) -> int`**: Queries active listener count.
+
+#### Class: `MCPIntegrationHandler`
+Cross-system execution bridge orchestrating tool telemetry, feature logging, and event broadcasting.
+```python
+MCPIntegrationHandler(
+    tool_registry: Optional[MCPToolRegistry] = None,
+    telemetry_collector: Optional[RiskTelemetryCollector] = None,
+    feature_store: Optional[ParquetFeatureStore] = None,
+    notification_dispatcher: Optional[MCPNotificationDispatcher] = None,
+    server: Optional[MCPServer] = None,
+)
+```
+- **`execute_tool(tool_name: str, arguments: Dict[str, Any]) -> ToolCallResult`**:
+  Executes tool, records latency telemetry into `ToolExecutionStats`, optionally streams features to `ParquetFeatureStore`, and broadcasts notifications.
+- **`get_stats(tool_name: Optional[str] = None) -> Dict[str, Any]`**: Returns tool execution statistics.
+
+---
+
+### 13.9 Protocol Contracts (`models.interfaces`)
+
+The following typing protocols define swappable interfaces across the MCP subsystem:
+- **`MCPServerProtocol`**: Structural contract for MCP server implementations.
+- **`MCPToolRegistryProtocol`**: Interface for tool registration and execution.
+- **`MCPResourceRegistryProtocol`**: Interface for virtual resource providers and lookup.
+- **`MCPPromptRegistryProtocol`**: Interface for prompt registration and rendering.
+- **`MCPSessionHandlerProtocol`**: Interface for session tracking and authentication.
+- **`MCPIntegrationHandlerProtocol`**: Interface for unified tool execution and telemetry recording.
+

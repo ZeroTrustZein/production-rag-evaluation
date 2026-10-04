@@ -462,3 +462,207 @@ $$\Delta\mu = \frac{\bar{X}_{\text{target}} - \bar{X}_{\text{baseline}}}{\sigma_
    - Automatically purges historical records older than a configured Time-To-Live threshold ($t_{\text{now}} - t_{\text{record}} > \text{TTL}$), maintaining compliant data governance.
 4. **Point-in-Time Multi-Group Join**:
    - `FeatureExportHandler` performs multi-group joins aligned by `entity_id` to produce offline training datasets in Parquet, CSV, JSON, or Arrow formats.
+
+---
+
+## 9. Model Context Protocol (MCP) Server Architecture & Tool Subsystem
+
+The Model Context Protocol (MCP) subsystem transforms `production-rag-evaluation` from a standalone library and CLI into an interactive, agentic server. It exposes financial RAG evaluation algorithms, hallucination auditing engines, portfolio risk analytics, and feature stores directly to LLM clients (such as Claude Desktop, OpenCode, Cursor, and autonomous agent loops) via standardized JSON-RPC 2.0 communication.
+
+```
++-----------------------------------------------------------------------------------+
+|               External LLM Client (Claude Desktop, OpenCode, Cursor)             |
++-----------------------------------------+-----------------------------------------+
+                                          |
+                        JSON-RPC 2.0      | [stdio / HTTP / SSE]
+                                          v
++-----------------------------------------------------------------------------------+
+|                        MCPServer Dispatcher & Router                              |
+|  - Protocol Version Negotiation ("2024-11-05")                                    |
+|  - Standard JSON-RPC 2.0 Error Enveloping (-32700 to -32603)                      |
+|  - Batch Request Parsing & Dispatching                                            |
++-----+-------------------+-------------------+-------------------+-----------------+
+      |                   |                   |                   |
+      v                   v                   v                   v
++-------------+   +---------------+   +-------------------+   +--------------------+
+|  Sessions   |   |     Tools     |   |     Resources     |   |      Prompts       |
+| MCPSession  |   |MCPToolRegistry|   |MCPResourceRegistry|   | MCPPromptRegistry  |
+|   Handler   |   | 6 Core Tools  |   |   rag:// URIs     |   | Workflows/Audit    |
++-------------+   +-------+-------+   +---------+---------+   +---------+----------+
+                          |                     |                       |
+                          +---------------------+-----------------------+
+                                                |
+                                                v
++-----------------------------------------------------------------------------------+
+|                   MCPIntegrationHandler & Notification Dispatcher                 |
+|  - Pub/Sub Topic Routing ("*", "evaluations", "tools/<name>")                     |
+|  - Tool Latency Telemetry & Execution Accounting (ToolExecutionStats)             |
+|  - Feature Store & Telemetry Ingestion Hook                                       |
++---------------------------------------+-------------------------------------------+
+                                        |
+                                        v
++-----------------------------------------------------------------------------------+
+|                          Underlying Evaluation Subsystems                         |
+|   RAGEvaluator  |  HallucinationDetector  |  FinancialRiskEngine  | FeatureStore  |
++-----------------------------------------------------------------------------------+
+```
+
+### 9.1 Wire Protocol & Transport Layers
+
+The server implements JSON-RPC 2.0 protocol specifications conforming to MCP specification version `2024-11-05`.
+
+#### Transport Modes (`MCPTransport`)
+1. **Standard I/O (`stdio`)**:
+   - Primary transport for local desktop assistants (Claude Desktop, OpenCode, Cursor).
+   - Operates on standard input (`stdin`) and standard output (`stdout`) using newline-delimited JSON strings (`\n`).
+   - Logging and diagnostic output is strictly routed to `stderr` or rotating files to ensure zero interference with the JSON-RPC wire protocol on `stdout`.
+2. **Server-Sent Events & HTTP (`sse` / `http`)**:
+   - Network-bound transport for microservices and distributed multi-agent clusters.
+   - Binds to configurable host and port interfaces (`127.0.0.1:8000` default) supporting optional bearer token authentication (`auth_token`).
+
+#### JSON-RPC 2.0 Envelope Specification
+- **Request (`JSONRPCRequest`)**:
+  ```json
+  {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "rag_evaluate", "arguments": {...}}}
+  ```
+- **Response (`JSONRPCResponse`)**:
+  ```json
+  {"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "..."}], "isError": false}}
+  ```
+- **Error (`JSONRPCError`)**:
+  ```json
+  {"jsonrpc": "2.0", "id": 1, "error": {"code": -32602, "message": "Invalid params: query_text is required"}}
+  ```
+
+#### Protocol Error Mappings
+| Error Code | Error Constant | Trigger Condition |
+| :--- | :--- | :--- |
+| **`-32700`** | `Parse error` | Inbound payload cannot be parsed as valid JSON. |
+| **`-32600`** | `Invalid Request` | JSON payload lacks `method` or violates JSON-RPC 2.0 schema. |
+| **`-32601`** | `Method not found` | Invoked method is not recognized by the dispatcher. |
+| **`-32602`** | `Invalid params` | Tool arguments or parameters fail schema validation. |
+| **`-32603`** | `Internal error` | Unhandled exception encountered during execution. |
+| **`-32002`** | `Resource not found` | Requested URI is unregistered in `MCPResourceRegistry`. |
+
+---
+
+### 9.2 Tool Execution Engine & Dynamic Schema Synthesis
+
+The `MCPToolRegistry` coordinates tool discovery and execution. Each tool is described by an `MCPTool` model with an `inputSchema` compliant with JSON Schema draft-07.
+
+#### Tool Registration & Schema Generation
+Tools can be registered either with explicit JSON Schema dictionaries or declaratively using a list of `ToolParameter` objects:
+```python
+MCPTool(
+    name="rag_detect_hallucinations",
+    description="Audit text against ground truth chunks for numerical distortions.",
+    parameters=[
+        ToolParameter(name="generated_answer", type="string", required=True),
+        ToolParameter(name="context_chunks", type="array", required=True),
+        ToolParameter(name="numerical_tolerance_pct", type="number", required=False, default=0.01),
+    ],
+    handler=handle_rag_detect_hallucinations,
+)
+```
+When `parameters` is supplied, `MCPTool` automatically synthesizes the standard `inputSchema` object during model validation.
+
+#### Core Tool Catalog
+The default registry registers 6 production tools:
+
+| Tool Name | Subsystem Target | Core Functionality |
+| :--- | :--- | :--- |
+| **`rag_evaluate`** | `RAGEvaluator` | Multi-factor evaluation DAG (faithfulness, relevance, precision, citation grounding, numerical target verification). |
+| **`rag_detect_hallucinations`** | `HallucinationDetector` | Financial hallucination audit detecting numerical distortions, contradictory claims, and ungrounded statements. |
+| **`rag_risk_metrics`** | `FinancialRiskEngine` | Quantitative portfolio risk metrics (Sharpe, Sortino, Calmar, Cornish-Fisher VaR/CVaR, Max Drawdown). |
+| **`rag_stress_test`** | `MonteCarloStressTester` | Monte Carlo macroeconomic and micro shock stress testing across 6 scenarios. |
+| **`rag_feature_stats`** | `ParquetFeatureStore` | Inspects feature definitions, schemas, and storage footprints across feature groups. |
+| **`rag_cache_lookup`** | `SemanticCache` | Direct semantic cache retrieval, entry eviction, and hit-rate telemetry inspection. |
+
+---
+
+### 9.3 Dynamic Virtual Resources & URI Hierarchy
+
+The `MCPResourceRegistry` exposes dynamic virtual resources allowing AI clients to query system configuration, schemas, and real-time operational status via standard `resources/read` requests.
+
+#### URI Scheme Specification (`rag://`)
+All virtual resources use the `rag://` authority scheme:
+
+```
+rag://<domain>/<entity>
+```
+
+1. **`rag://system/health`** (`application/json`):
+   - Returns real-time health diagnostics across all engines: evaluator status, cache metrics (hit rate, memory count), feature store base path, and active registered tools count.
+2. **`rag://features/schema`** (`application/json`):
+   - Returns full schema definitions across all 5 feature groups (`QUERY`, `CHUNK`, `RESPONSE`, `EVALUATION`, `FINANCIAL`) with Arrow types and nullability flags.
+3. **`rag://finance/scenarios`** (`application/json`):
+   - Returns catalog of supported stress testing profiles (`BASELINE`, `VOLATILITY_SPIKE`, `LIQUIDITY_CRUNCH`, `RATE_SHOCK`, `BLACK_SWAN`, `HALLUCINATION_CASCADE`) with default parameters.
+4. **`rag://evaluations/summary`** (`application/json`):
+   - Returns production evaluation policies: passing thresholds for faithfulness ($0.85$), relevance ($0.80$), precision ($0.75$), citation grounding ($0.80$), and claim verification ($0.80$).
+
+---
+
+### 9.4 Prompt Template Engine & Multi-Turn Message Rendering
+
+The `MCPPromptRegistry` exposes curated prompt workflows via `prompts/list` and `prompts/get`. These templates standardize complex multi-step financial evaluation instructions:
+
+1. **`earnings_call_audit`**:
+   - Arguments: `company`, `quarter`, `transcript_segment`, `generated_summary`.
+   - Produces a compliance-oriented audit prompt demanding verification of revenues, margins, EPS, directional guidance, and ungrounded statements.
+2. **`sec_10k_verification`**:
+   - Arguments: `ticker`, `fiscal_year`, `filing_excerpt`, `model_claim`.
+   - Produces an SEC filing verification prompt cross-examining specific textual disclosures and numerical disclosures.
+3. **`portfolio_risk_audit`**:
+   - Arguments: `portfolio_id`, `risk_metrics_json`, `stress_test_json`.
+   - Formulates a quantitative risk audit comparing historical returns, Cornish-Fisher VaR, and Monte Carlo stress loss distributions against regulatory capital guidelines.
+
+---
+
+### 9.5 Session Management, Telemetry & Integration Pipeline
+
+#### Session Lifecycle (`MCPSessionHandler`)
+Client sessions transition through a managed state machine:
+
+```
+    [initialize request]
+             |
+             v
+      +--------------+
+      | INITIALIZING |
+      +------+-------+
+             |
+             | [Valid Auth / Handshake Complete]
+             v
+      +--------------+      [Heartbeat / Activity]
+      |  CONNECTED   +------------------------------+
+      +---+------+---+                              |
+          |      |                                  v
+          |      |                          +---------------+
+          |      +------------------------->| ACTIVE (Ping) |
+          |      | [Idle > session_ttl]     +---------------+
+          |      v
+          |  +--------------+
+          |  |   EXPIRED    |
+          |  +--------------+
+          |
+          | [shutdown / disconnect]
+          v
+      +--------------+
+      | DISCONNECTED |
+      +--------------+
+```
+
+- Each session tracks `created_at`, `last_active_at`, and `request_count`.
+- Automatic session cleanup (`cleanup_expired_sessions()`) evicts idle sessions older than `session_ttl_seconds` (default: 3600s).
+
+#### Telemetry & Latency Accounting (`ToolExecutionStats`)
+For every executed tool, the `MCPIntegrationHandler` records cumulative operational metrics:
+$$\mu_{\text{latency}} = \frac{1}{N} \sum_{i=1}^N \Delta t_i$$
+Tracking `call_count`, `error_count`, `total_latency_ms`, and `mean_latency_ms`.
+
+#### Real-Time Event Dispatching (`MCPNotificationDispatcher`)
+A thread-safe publish-subscribe bus distributes events across topics:
+- `evaluations`: Emits full evaluation payloads on every completed `rag_evaluate` call.
+- `tools/<name>`: Emits execution logs for individual tools.
+- `*`: Wildcard broadcast listener delivering real-time telemetry to connected observers and dashboards.
+

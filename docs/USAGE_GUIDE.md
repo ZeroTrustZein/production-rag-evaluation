@@ -361,6 +361,79 @@ rag-eval evaluate \
 
 ---
 
+### 2.9 Model Context Protocol (MCP) Server & Tools Manual (`mcp`)
+
+The `mcp` command group manages, tests, and serves the Model Context Protocol (MCP) server, exposing financial RAG evaluation algorithms, hallucination auditing, and risk metrics directly to LLM desktop clients and autonomous agents via JSON-RPC 2.0.
+
+#### 1. Launch MCP Server (`serve`)
+```bash
+# Launch standard I/O server for Claude Desktop / OpenCode / Cursor
+rag-eval mcp serve --transport stdio
+
+# Launch network-bound server with session management and debug tracing
+rag-eval mcp serve \
+  --transport http \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --enable-sessions \
+  --debug
+
+# Direct binary shortcut
+rag-mcp-server --transport stdio
+```
+
+#### 2. Discover Registered Tools (`list-tools`)
+```bash
+# Display formatted Rich table of available tools, descriptions, and input parameters
+rag-eval mcp list-tools
+
+# Output raw JSON schema descriptors for programmatic introspection
+rag-eval mcp list-tools --json-out
+```
+
+#### 3. Inspect Virtual Resources (`list-resources`)
+```bash
+# List all exposed virtual resources and URI schemes
+rag-eval mcp list-resources
+
+# Output raw JSON resource descriptors
+rag-eval mcp list-resources --json-out
+```
+
+#### 4. Inspect Audit Prompt Templates (`list-prompts`)
+```bash
+# View available guided prompt workflows and required template arguments
+rag-eval mcp list-prompts
+
+# Output raw JSON prompt descriptors
+rag-eval mcp list-prompts --json-out
+```
+
+#### 5. Execute an MCP Tool Directly (`call-tool`)
+```bash
+# Evaluate a financial claim directly via the MCP tool interface
+rag-eval mcp call-tool \
+  --name rag_evaluate \
+  --arguments '{
+    "query_text": "What were Tesla automotive revenues?",
+    "generated_answer": "Tesla reported automotive revenues of $21.3 billion.",
+    "context_chunks": ["Tesla reported automotive revenues of $21.3 billion, down 3% year-over-year."]
+  }'
+
+# Run quantitative risk analysis via inline arguments
+rag-eval mcp call-tool \
+  --name rag_risk_metrics \
+  --arguments '{"returns": [0.012, -0.005, 0.008, -0.015, 0.021], "risk_free_rate": 0.045}' \
+  --json-out
+
+# Execute tool using parameters loaded from a JSON file
+rag-eval mcp call-tool \
+  --name rag_detect_hallucinations \
+  --arguments @audit_request.json
+```
+
+---
+
 ## 3. Python API Workflows & Recipes
 
 ### Workflow 1: End-to-End SEC 10-K RAG Evaluation
@@ -677,3 +750,190 @@ dataset_path = exporter.export_dataset(
 
 print(f"Exported training dataset to: {dataset_path}")
 ```
+
+---
+
+### Workflow 9: Claude Desktop, OpenCode & Cursor Integration
+
+Integrate `production-rag-evaluation` with your favorite AI developer environments by registering the MCP server.
+
+#### 1. Claude Desktop Configuration
+Add the server entry to your Claude Desktop configuration file:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "production-rag-evaluation": {
+      "command": "rag-eval",
+      "args": ["mcp", "serve", "--transport", "stdio"],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "SEMANTIC_CACHE_ENABLED": "true"
+      }
+    }
+  }
+}
+```
+
+#### 2. OpenCode Configuration
+Add to `~/.config/opencode/opencode.json` or your project `.opencode/opencode.json`:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "rag-eval": {
+        "command": "rag-eval",
+        "args": ["mcp", "serve", "--transport", "stdio"]
+      }
+    }
+  }
+}
+```
+
+#### 3. Cursor IDE Configuration
+Add to `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "rag-eval": {
+      "command": "rag-eval",
+      "args": ["mcp", "serve", "--transport", "stdio"]
+    }
+  }
+}
+```
+
+---
+
+### Workflow 10: Programmatic Python MCP Server & Tool Invocation
+
+```python
+import json
+from production_rag_evaluation.mcp import (
+    create_mcp_server,
+    MCPConfig,
+    MCPTransport,
+    get_default_tool_registry,
+)
+
+# 1. Initialize server with custom configuration
+config = MCPConfig(
+    server_name="financial-rag-agent",
+    transport=MCPTransport.STDIO,
+    debug=True,
+)
+server = create_mcp_server(config=config, enable_session_handler=True)
+
+# 2. Query available tools via JSON-RPC protocol
+list_tools_request = json.dumps({
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/list",
+    "params": {},
+})
+
+raw_response = server.handle_message(list_tools_request)
+response_data = json.loads(raw_response)
+tools = response_data["result"]["tools"]
+print(f"Server exposed {len(tools)} tools: {[t['name'] for t in tools]}")
+
+# 3. Invoke rag_evaluate tool via JSON-RPC request
+eval_request = json.dumps({
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+        "name": "rag_evaluate",
+        "arguments": {
+            "query_text": "What were Apple's net sales in fiscal 2024?",
+            "generated_answer": "Apple reported net sales of $391.0 billion in fiscal 2024.",
+            "context_chunks": [
+                "Apple Inc. reported net sales of $391.0 billion for the fiscal year ended September 28, 2024."
+            ],
+            "ticker": "AAPL",
+            "mode": "STRICT",
+        },
+    },
+})
+
+eval_raw_response = server.handle_message(eval_request)
+eval_result = json.loads(eval_raw_response)["result"]
+
+print("Evaluation Tool Result:")
+print(eval_result["content"][0]["text"])
+```
+
+---
+
+### Workflow 11: Prompt Template Rendering & LLM Context Injection
+
+```python
+from production_rag_evaluation.mcp import get_default_prompt_registry
+
+# 1. Fetch pre-configured prompt template registry
+prompt_reg = get_default_prompt_registry()
+
+# 2. Inspect registered prompt workflows
+prompts = prompt_reg.list_prompts()
+print(f"Available prompt templates: {[p['name'] for p in prompts]}")
+
+# 3. Render 'earnings_call_audit' workflow with parameters
+audit_context = prompt_reg.render(
+    name="earnings_call_audit",
+    arguments={
+        "company": "Alphabet Inc.",
+        "quarter": "Q3 2024",
+        "transcript_segment": "Sundar Pichai: Cloud revenue grew 35% year over year to $11.4 billion.",
+        "generated_summary": "Alphabet announced cloud revenue of $11.4 billion, reflecting 35% growth.",
+    },
+)
+
+print(f"Rendered Prompt Description: {audit_context['description']}")
+for msg in audit_context["messages"]:
+    print(f"[{msg['role'].upper()}]:\n{msg['content']}")
+```
+
+---
+
+### Workflow 12: Real-time Telemetry Dispatch & Notification Subscribers
+
+```python
+from production_rag_evaluation.mcp import (
+    MCPIntegrationHandler,
+    MCPNotificationDispatcher,
+    get_default_tool_registry,
+)
+
+# 1. Setup dispatcher and subscribe to real-time events
+dispatcher = MCPNotificationDispatcher()
+
+def on_evaluation_event(topic: str, payload: dict) -> None:
+    tool = payload.get("tool")
+    latency = payload.get("latency_ms", 0.0)
+    print(f"[EVENT] Topic: {topic} | Tool: {tool} | Latency: {latency:.2f}ms")
+
+# Subscribe to all tool events using wildcard
+dispatcher.subscribe("*", on_evaluation_event)
+
+# 2. Initialize integration handler with notification bus
+handler = MCPIntegrationHandler(
+    tool_registry=get_default_tool_registry(),
+    notification_dispatcher=dispatcher,
+)
+
+# 3. Execute tool through integration handler
+result = handler.execute_tool(
+    tool_name="rag_risk_metrics",
+    arguments={"returns": [0.015, -0.008, 0.012, 0.004, -0.010]},
+)
+
+# 4. Inspect tool execution latency statistics
+stats = handler.get_stats("rag_risk_metrics")
+print(f"Call Count: {stats['call_count']}")
+print(f"Mean Latency: {stats['mean_latency_ms']:.2f} ms")
+```
+
