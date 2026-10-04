@@ -86,8 +86,13 @@ class MCPToolRegistry:
             return ToolCallResult.text(json.dumps(res, default=str, indent=2))
         except TypeError as te:
             logger.warning("Invalid arguments passed to tool '%s': %s", name, te)
+            msg = str(te)
+            if "missing" in msg.lower() or "required" in msg.lower():
+                err_msg = f"Missing required argument for tool '{name}': {te}"
+            else:
+                err_msg = f"Invalid arguments for tool '{name}': {te}"
             return ToolCallResult.text(
-                f"Invalid arguments for tool '{name}': {te}",
+                err_msg,
                 is_error=True,
                 metadata={"error_type": "InvalidArgument", "details": str(te)},
             )
@@ -293,14 +298,34 @@ def handle_rag_detect_hallucinations(
 
 
 def handle_rag_risk_metrics(
-    returns: Sequence[float],
+    returns: Any = None,
     benchmark_returns: Optional[Sequence[float]] = None,
     risk_free_rate: float = 0.045,
     frequency: str = "DAILY",
-) -> Dict[str, Any]:
+) -> Any:
     """Calculate institutional risk metrics on return series."""
+    if returns is None or (isinstance(returns, dict) and not returns):
+        return ToolCallResult.text(
+            "Missing required argument 'returns'",
+            is_error=True,
+            metadata={"error_type": "MissingArgument"},
+        )
+    if not isinstance(returns, (list, tuple, np.ndarray)):
+        return ToolCallResult.text(
+            "Argument 'returns' must be an array of values",
+            is_error=True,
+            metadata={"error_type": "InvalidArgument"},
+        )
+    try:
+        ret_arr = np.array(returns, dtype=np.float64)
+    except (ValueError, TypeError) as exc:
+        return ToolCallResult.text(
+            f"Invalid return series: {exc}",
+            is_error=True,
+            metadata={"error_type": "InvalidArgument", "details": str(exc)},
+        )
+
     engine = _get_risk_engine()
-    ret_arr = np.array(returns, dtype=np.float64)
     bench_arr = np.array(benchmark_returns, dtype=np.float64) if benchmark_returns else None
 
     metrics = engine.compute_all_metrics(
@@ -328,15 +353,35 @@ def handle_rag_risk_metrics(
 
 
 def handle_rag_stress_test(
-    returns: Sequence[float],
+    returns: Any = None,
     num_simulations: int = 1000,
     horizon_days: int = 30,
     scenario: str = "BASELINE",
     confidence_interval: float = 0.95,
-) -> Dict[str, Any]:
+) -> Any:
     """Execute Monte Carlo forward stress test under simulated market conditions."""
+    if returns is None or (isinstance(returns, dict) and not returns):
+        return ToolCallResult.text(
+            "Missing required argument 'returns'",
+            is_error=True,
+            metadata={"error_type": "MissingArgument"},
+        )
+    if not isinstance(returns, (list, tuple, np.ndarray)):
+        return ToolCallResult.text(
+            "Argument 'returns' must be an array of values",
+            is_error=True,
+            metadata={"error_type": "InvalidArgument"},
+        )
+    try:
+        ret_arr = np.array(returns, dtype=np.float64)
+    except (ValueError, TypeError) as exc:
+        return ToolCallResult.text(
+            f"Invalid return series: {exc}",
+            is_error=True,
+            metadata={"error_type": "InvalidArgument", "details": str(exc)},
+        )
+
     tester = _get_stress_tester()
-    ret_arr = np.array(returns, dtype=np.float64)
 
     scen_type = (
         StressScenarioType(scenario.upper())
@@ -399,7 +444,7 @@ def handle_rag_feature_stats(
 def handle_rag_cache_lookup(
     query_text: Optional[str] = None,
     action: str = "GET",
-) -> Dict[str, Any]:
+) -> Any:
     """Interact with semantic evaluation cache."""
     cache = _get_cache()
     act = action.upper()
@@ -413,7 +458,11 @@ def handle_rag_cache_lookup(
 
     # GET action
     if not query_text:
-        return {"action": "GET", "error": "query_text is required for cache lookup"}
+        return ToolCallResult.text(
+            "query_text is required for cache lookup",
+            is_error=True,
+            metadata={"error_type": "MissingArgument"},
+        )
 
     match = cache.get(query_text)
     if match is None:

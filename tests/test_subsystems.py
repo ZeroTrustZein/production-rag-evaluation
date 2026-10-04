@@ -5,6 +5,8 @@ Covers FinancialRiskEngine, MonteCarloStressTester, and RiskTelemetryCollector.
 
 from __future__ import annotations
 
+from typing import Any, Dict, List
+
 import numpy as np
 import pytest
 
@@ -880,7 +882,6 @@ class TestMCPSubsystems:
     def test_server_lifecycle_and_handshake(self) -> None:
         from production_rag_evaluation.mcp import (
             MCPConfig,
-            MCPServer,
             create_mcp_server,
         )
 
@@ -1072,9 +1073,6 @@ class TestMCPSubsystems:
 
     def test_prompt_registry_subsystem(self) -> None:
         from production_rag_evaluation.mcp import (
-            MCPPrompt,
-            MCPPromptArgument,
-            MCPPromptRegistry,
             get_default_prompt_registry,
         )
 

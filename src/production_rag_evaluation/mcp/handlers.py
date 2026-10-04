@@ -120,7 +120,7 @@ class MCPNotificationDispatcher:
         """Publish payload to all registered topic subscribers. Returns notification count."""
         listeners = self._subscribers.get(topic, [])
         wildcard_listeners = self._subscribers.get("*", [])
-        all_listeners = listeners + [l for l in wildcard_listeners if l not in listeners]
+        all_listeners = listeners + [item for item in wildcard_listeners if item not in listeners]
 
         dispatched = 0
         for listener in all_listeners:
