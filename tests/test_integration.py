@@ -384,12 +384,12 @@ class TestMCPFullIntegrationPipeline:
                 "params": {
                     "name": "rag_evaluate",
                     "arguments": {
-                    "query_text": "What was Amazon AWS operating profit?",
-                    "generated_answer": "Amazon AWS operating profit was $10.4 billion in Q3.",
-                    "context_chunks": [
-                        "Amazon AWS operating profit was $10.4 billion in Q3, up from $7.0 billion a year earlier."
-                    ],
-                    "ticker": "AMZN",
+                        "query_text": "What was Amazon AWS operating profit?",
+                        "generated_answer": "Amazon AWS operating profit was $10.4 billion in Q3.",
+                        "context_chunks": [
+                            "Amazon AWS operating profit was $10.4 billion in Q3, up from $7.0 billion a year earlier."
+                        ],
+                        "ticker": "AMZN",
                     },
                 },
             }

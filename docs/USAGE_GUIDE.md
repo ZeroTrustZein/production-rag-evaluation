@@ -441,9 +441,11 @@ print(f"Latency: {metrics.evaluation_latency_ms} ms")
 import pytest
 from production_rag_evaluation import HallucinationDetector, DocumentChunk, Severity
 
+
 @pytest.fixture
 def detector():
     return HallucinationDetector(numerical_tolerance_pct=0.01)
+
 
 def test_rag_prevents_critical_financial_hallucinations(detector):
     context = [
@@ -453,12 +455,12 @@ def test_rag_prevents_critical_financial_hallucinations(detector):
             text="Automotive revenues decreased 3% year-over-year to $21.3 billion.",
         )
     ]
-    
+
     # Generated response hallucinating growth
     hallucinated_answer = "Tesla's automotive revenue grew significantly to $25.0 billion."
-    
+
     findings = detector.analyze(hallucinated_answer, context)
-    
+
     # Must catch contradiction and distortion
     critical_findings = [f for f in findings if f.severity == Severity.CRITICAL]
     assert len(critical_findings) > 0, "Failed to flag directional contradiction"
@@ -516,9 +518,11 @@ from production_rag_evaluation import (
 
 collector = RiskTelemetryCollector()
 
+
 # Register alert listener callback (e.g. for Slack / PagerDuty webhook)
 def on_alert(alert: TelemetryAlert):
     print(f"[{alert.severity.value}] {alert.metric_name}: {alert.message}")
+
 
 collector.add_alert_listener(on_alert)
 
@@ -607,7 +611,9 @@ reports = detector.detect_all_drift(group=FeatureGroup.EVALUATION, psi_threshold
 
 for report in reports:
     status = "DRIFT DETECTED" if report.drift_detected else "STABLE"
-    print(f"[{status}] Feature: {report.feature_name} | PSI: {report.psi_score:.4f} (Threshold: {report.threshold})")
+    print(
+        f"[{status}] Feature: {report.feature_name} | PSI: {report.psi_score:.4f} (Threshold: {report.threshold})"
+    )
 
 # Generate telemetry alerts and register with RiskTelemetryCollector
 alerts = detector.generate_telemetry_alerts(collector=collector, reports=reports)
