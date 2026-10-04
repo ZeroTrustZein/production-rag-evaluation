@@ -61,10 +61,17 @@ Detailed technical guides and reference manuals are available in the [`docs/`](d
   - Population Stability Index (PSI) drift detection (`FeatureDriftDetector`) with automated telemetry alerts.
   - Automated partition compaction, entity deduplication, and configurable TTL data retention.
   - Point-in-time multi-group join matrix export to Parquet, CSV, JSON, and Arrow.
+- **Model Context Protocol (MCP) Server & Tool Suite (`rag-eval mcp`)**:
+  - Full JSON-RPC 2.0 implementation compliant with MCP specification version `2024-11-05`.
+  - 6 standardized agent tools: `rag_evaluate`, `rag_detect_hallucinations`, `rag_risk_metrics`, `rag_stress_test`, `rag_feature_stats`, `rag_cache_lookup`.
+  - Dynamic virtual resources via `rag://` scheme (`rag://system/health`, `rag://features/schema`, `rag://finance/scenarios`, `rag://evaluations/summary`).
+  - Parameterized prompt workflows: `earnings_call_audit`, `sec_10k_verification`, `portfolio_risk_audit`.
+  - Multi-transport dispatching: stdio for Claude Desktop, OpenCode, and Cursor; HTTP/SSE for remote multi-agent clusters.
 - **Production CLI & Script Automation (`rag-eval`)**:
   - Full support for interactive Rich tables and scriptable `--json-out`.
   - Batch evaluation from JSON and JSONL datasets with p95 latency reporting.
   - Feature store management commands (`rag-eval feature-store stats/compact/export/drift/list-schemas`).
+  - Model Context Protocol server suite (`rag-eval mcp serve/list-tools/list-resources/list-prompts/call-tool`).
   - Cache management commands (`rag-eval cache stats`, `rag-eval cache clear`).
 
 ---
@@ -222,7 +229,33 @@ rag-eval cache stats
 rag-eval feature-store stats --path ./data/feature_store
 rag-eval feature-store drift --path ./data/feature_store --psi-threshold 0.25
 rag-eval feature-store compact --path ./data/feature_store --ttl 2592000
+
+# 8. Model Context Protocol (MCP) server & tool execution
+rag-eval mcp list-tools
+rag-eval mcp list-resources
+rag-eval mcp list-prompts
+rag-eval mcp call-tool -n rag_evaluate -a '{"query_text": "...", "generated_answer": "...", "context_chunks": ["..."]}'
+rag-eval mcp serve --transport stdio
 ```
+
+---
+
+### Model Context Protocol (MCP) Integration
+
+Connect `production-rag-evaluation` directly to Claude Desktop, OpenCode, or Cursor as an MCP server:
+
+```json
+{
+  "mcpServers": {
+    "production-rag-evaluation": {
+      "command": "rag-eval",
+      "args": ["mcp", "serve", "--transport", "stdio"]
+    }
+  }
+}
+```
+
+Exposes 6 agent tools (`rag_evaluate`, `rag_detect_hallucinations`, `rag_risk_metrics`, `rag_stress_test`, `rag_feature_stats`, `rag_cache_lookup`), dynamic resources (`rag://system/health`, `rag://features/schema`, `rag://finance/scenarios`, `rag://evaluations/summary`), and guided audit prompts (`earnings_call_audit`, `sec_10k_verification`, `portfolio_risk_audit`).
 
 ---
 
@@ -246,13 +279,20 @@ production-rag-evaluation/
 |   |   |-- extractors.py          # Domain feature extractors (Query, Chunk, Response, Eval, Finance)
 |   |   |-- handlers.py            # Evaluation hooks, compaction, and dataset export handlers
 |   |   |-- models.py              # Feature schemas, records, online vectors, and compaction models
-|   |   |-- pipeline.py            # Streaming feature ingestion and buffering pipeline
+|   |   |-- pipeline.py            # Streaming ingestion pipeline with in-memory ring buffer
 |   |   |-- registry.py            # Strongly-typed schema registry and PyArrow mappings
 |   |   +-- store.py               # Columnar Apache Parquet storage engine
 |   |-- finance/
 |   |   |-- metrics.py             # Sharpe, Sortino, Calmar, Drawdown & Cornish-Fisher VaR
 |   |   |-- stress_testing.py      # Monte Carlo GBM & fat-tailed Student-t stress simulator
 |   |   +-- telemetry.py           # Rolling metrics, Welch's t-test drift & operational alerting
+|   |-- mcp/
+|   |   |-- handlers.py            # Session management, notifications, and integration bridge
+|   |   |-- models.py              # JSON-RPC 2.0 schemas, MCP configs, tool models
+|   |   |-- prompts.py             # Prompt template registry and parameter rendering
+|   |   |-- resources.py           # Virtual resource providers (rag:// URI schemes)
+|   |   |-- server.py              # MCPServer dispatcher and stdio/network runner
+|   |   +-- tools.py               # MCPToolRegistry and 6 core tool implementations
 |   |-- models/
 |   |   |-- interfaces.py          # Swappable protocol contracts
 |   |   +-- schemas.py             # Pydantic domain models & enumerations
@@ -284,9 +324,9 @@ production-rag-evaluation/
 
 The repository enforces strict code quality and test coverage standards:
 
-- **100% Test Pass Rate**: 152/152 tests passing in < 1 second.
-- **100% Statement Coverage**: Zero uncovered statements across all core, finance, model, and CLI modules.
-- **Static Typing**: Fully typed with strict Mypy compliance (`py.typed`).
+- **100% Test Pass Rate**: 213/213 tests passing in ~1.0 second.
+- **Comprehensive Coverage**: Thorough coverage across core, feature store, finance, MCP, model, and CLI modules.
+- **Static Typing**: Fully typed with strict Mypy compliance across 41 source files (`py.typed`).
 - **Code Style**: Formatted and linted with Ruff.
 
 ```bash
