@@ -21,6 +21,13 @@ class BaseAgent(ABC):
         self.role = role
         self.status = AgentStatus.IDLE
         self.inbox: List[AgentMessage] = []
+        self.last_execution_time_ms: float = 0.0
+
+    def reset(self) -> None:
+        """Reset agent lifecycle state and flush buffered inbox."""
+        self.status = AgentStatus.IDLE
+        self.inbox.clear()
+        self.last_execution_time_ms = 0.0
 
     def receive_message(self, message: AgentMessage) -> None:
         """Receive and buffer an incoming inter-agent message."""
@@ -48,6 +55,7 @@ class BaseAgent(ABC):
             "role": self.role.value,
             "status": self.status.value,
             "inbox_count": len(self.inbox),
+            "last_execution_time_ms": self.last_execution_time_ms,
         }
 
     @abstractmethod
@@ -77,9 +85,23 @@ class AgentRegistry:
         """List registered agents with operational status."""
         return [a.to_dict() for a in self._agents.values()]
 
+    def unregister(self, name: str) -> Optional[BaseAgent]:
+        """Remove agent from registry by name."""
+        return self._agents.pop(name, None)
+
+    def get_active_agents(self) -> List[BaseAgent]:
+        """Retrieve agents in active or idle operational states."""
+        return [a for a in self._agents.values() if a.status != AgentStatus.FAILED]
+
     def count(self) -> int:
         """Return count of registered agents."""
         return len(self._agents)
+
+    def __len__(self) -> int:
+        return len(self._agents)
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._agents
 
     def clear(self) -> None:
         """Clear all registered agents."""

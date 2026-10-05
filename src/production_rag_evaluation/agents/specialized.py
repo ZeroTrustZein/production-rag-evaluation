@@ -65,12 +65,16 @@ class PlannerAgent(BaseAgent):
         steps.append(step_eval)
 
         # Step 3: Risk Analyst (can run after auditor and evaluator)
+        risk_inputs = {
+            "has_custom_returns": returns is not None,
+            "n_simulations": 30 if evaluation_mode == EvaluationMode.FAST else 100,
+        }
         step_risk = WorkflowStep(
             name="financial_risk_analysis",
             agent_role=AgentRole.RISK_ANALYST,
             mode=StepExecutionMode.SEQUENTIAL,
             dependencies=[step_audit.step_id, step_eval.step_id],
-            inputs={"has_custom_returns": returns is not None},
+            inputs=risk_inputs,
         )
         steps.append(step_risk)
 
@@ -121,8 +125,23 @@ class EvaluatorAgent(BaseAgent):
         query: RAGQuery = context["query"]
         response: RAGResponse = context["response"]
 
-        metrics: EvaluationMetrics = self.evaluator.evaluate(query, response)
+        mode_val = step.inputs.get("mode", EvaluationMode.THOROUGH.value)
+        try:
+            eval_mode = EvaluationMode(mode_val)
+        except (ValueError, TypeError):
+            eval_mode = EvaluationMode.THOROUGH
+
+        metrics: EvaluationMetrics = self.evaluator.evaluate(query, response, mode=eval_mode)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        self.last_execution_time_ms = elapsed_ms
+
+        msg = self.send_message(
+            receiver="synthesizer-agent",
+            content=f"Evaluator completed with faithfulness {metrics.faithfulness_score:.2%}",
+            payload={"faithfulness": metrics.faithfulness_score, "overall_pass": metrics.overall_pass},
+        )
+        if "messages" in context and isinstance(context["messages"], list):
+            context["messages"].append(msg)
 
         self.status = AgentStatus.COMPLETED
         return {
@@ -152,18 +171,21 @@ class AuditorAgent(BaseAgent):
         t0 = time.perf_counter()
         response: RAGResponse = context["response"]
         chunks: List[DocumentChunk] = response.retrieved_chunks
+        mode_val = step.inputs.get("mode", EvaluationMode.THOROUGH.value)
 
-        # Numerical distortions
-        num_distortions = self.detector.detect_numerical_distortions(
-            response.generated_answer, chunks
-        )
-        # Contradictions
-        contradictions = self.detector.detect_directional_contradictions(
-            response.generated_answer, chunks
-        )
+        if mode_val in (EvaluationMode.THOROUGH.value, EvaluationMode.STRICT.value):
+            all_findings = self.detector.analyze(response.generated_answer, chunks)
+        else:
+            num_distortions = self.detector.detect_numerical_distortions(
+                response.generated_answer, chunks
+            )
+            contradictions = self.detector.detect_directional_contradictions(
+                response.generated_answer, chunks
+            )
+            all_findings = num_distortions + contradictions
 
-        all_findings = num_distortions + contradictions
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        self.last_execution_time_ms = elapsed_ms
 
         severity_counts = {
             Severity.LOW.value: 0,
@@ -174,12 +196,25 @@ class AuditorAgent(BaseAgent):
         for f in all_findings:
             severity_counts[f.severity.value] += 1
 
+        has_critical = (
+            severity_counts[Severity.CRITICAL.value] > 0
+            or (mode_val == EvaluationMode.STRICT.value and severity_counts[Severity.HIGH.value] > 0)
+        )
+
+        msg = self.send_message(
+            receiver="synthesizer-agent",
+            content=f"Audit complete: {len(all_findings)} findings detected.",
+            payload={"finding_count": len(all_findings), "has_critical": has_critical},
+        )
+        if "messages" in context and isinstance(context["messages"], list):
+            context["messages"].append(msg)
+
         self.status = AgentStatus.COMPLETED
         return {
             "findings": all_findings,
             "finding_count": len(all_findings),
             "severity_counts": severity_counts,
-            "has_critical_findings": severity_counts[Severity.CRITICAL.value] > 0,
+            "has_critical_findings": has_critical,
             "execution_time_ms": elapsed_ms,
         }
 
@@ -214,16 +249,27 @@ class RiskAnalystAgent(BaseAgent):
         finding_count = auditor_results.get("finding_count", 0)
         hallucination_prob = min(0.50, 0.05 * finding_count)
 
+        n_sims = step.inputs.get("n_simulations", 100)
         stress_result = self.stress_tester.run_stress_test(
-            returns, n_simulations=100, horizon_days=20
+            returns, n_simulations=n_sims, horizon_days=20
         )
         breach_rate = self.stress_tester.stress_test_hallucination_impact(
             base_financial_estimates=[100.0, 105.0, 110.0],
             hallucination_probability=hallucination_prob,
-            n_simulations=50,
+            n_simulations=min(50, n_sims),
         )
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        self.last_execution_time_ms = elapsed_ms
+
+        msg = self.send_message(
+            receiver="synthesizer-agent",
+            content=f"Risk analysis complete: Sharpe={risk_metrics.sharpe_ratio:.2f}, BreachRate={breach_rate:.2%}",
+            payload={"sharpe": risk_metrics.sharpe_ratio, "breach_rate": breach_rate},
+        )
+        if "messages" in context and isinstance(context["messages"], list):
+            context["messages"].append(msg)
+
         self.status = AgentStatus.COMPLETED
         return {
             "risk_metrics": risk_metrics,
@@ -254,10 +300,23 @@ class SynthesizerAgent(BaseAgent):
         risk_res = step_results.get("financial_risk_analysis", {})
 
         faithfulness = eval_res.get("faithfulness_score", 1.0)
+        relevance = eval_res.get("answer_relevance_score", 1.0)
         overall_pass = eval_res.get("overall_pass", True)
         finding_count = audit_res.get("finding_count", 0)
         has_critical = audit_res.get("has_critical_findings", False)
         sharpe = risk_res.get("sharpe_ratio", 0.0)
+        breach_rate = risk_res.get("hallucination_breach_rate", 0.0)
+
+        # Composite RAG health score (0.0 to 1.0)
+        finding_penalty = min(1.0, 0.20 * finding_count)
+        sharpe_norm = max(0.0, min(1.0, (sharpe + 1.0) / 3.0))
+        composite_score = round(
+            0.40 * faithfulness
+            + 0.25 * relevance
+            + 0.20 * (1.0 - finding_penalty)
+            + 0.15 * sharpe_norm,
+            4,
+        )
 
         # Build summary narrative
         status_str = "APPROVED" if (overall_pass and not has_critical) else "FLAGGED"
@@ -265,7 +324,8 @@ class SynthesizerAgent(BaseAgent):
             f"Financial RAG Evaluation Status: {status_str}. "
             f"Faithfulness Score: {faithfulness:.2%}. "
             f"Hallucination Findings: {finding_count} detected. "
-            f"Portfolio Sharpe: {sharpe:.2f}."
+            f"Portfolio Sharpe: {sharpe:.2f}. "
+            f"Composite Health Score: {composite_score:.2f}."
         )
 
         # Build recommendations
@@ -274,16 +334,20 @@ class SynthesizerAgent(BaseAgent):
             recommendations.append("Reject response due to sub-threshold faithfulness.")
         if has_critical:
             recommendations.append("Critical financial distortion detected; manual compliance review required.")
+        if breach_rate > 0.15:
+            recommendations.append(f"High risk breach rate ({breach_rate:.1%}) indicates sensitivity to factual hallucinations.")
         if finding_count == 0 and overall_pass:
             recommendations.append("Response validated with high confidence; cleared for production dispatch.")
         if not recommendations:
             recommendations.append("Response passed with minor warnings; monitor drift in feature store.")
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        self.last_execution_time_ms = elapsed_ms
         self.status = AgentStatus.COMPLETED
         return {
             "status": status_str,
             "summary": summary,
             "recommendations": recommendations,
+            "composite_health_score": composite_score,
             "execution_time_ms": elapsed_ms,
         }
