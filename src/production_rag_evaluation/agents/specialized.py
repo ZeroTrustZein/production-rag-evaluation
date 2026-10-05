@@ -173,7 +173,7 @@ class AuditorAgent(BaseAgent):
         chunks: List[DocumentChunk] = response.retrieved_chunks
         mode_val = step.inputs.get("mode", EvaluationMode.THOROUGH.value)
 
-        if mode_val in (EvaluationMode.THOROUGH.value, EvaluationMode.STRICT.value):
+        if mode_val in (EvaluationMode.THOROUGH.value, EvaluationMode.FINANCIAL_STRICT.value, EvaluationMode.AUDIT.value):
             all_findings = self.detector.analyze(response.generated_answer, chunks)
         else:
             num_distortions = self.detector.detect_numerical_distortions(
@@ -198,7 +198,7 @@ class AuditorAgent(BaseAgent):
 
         has_critical = (
             severity_counts[Severity.CRITICAL.value] > 0
-            or (mode_val == EvaluationMode.STRICT.value and severity_counts[Severity.HIGH.value] > 0)
+            or severity_counts[Severity.HIGH.value] > 0
         )
 
         msg = self.send_message(

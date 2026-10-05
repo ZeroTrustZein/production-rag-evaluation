@@ -548,3 +548,290 @@ class TestStreamingFeaturePipelineCore:
         stats = pipeline.stats()
         assert "sliding_window" in stats
         assert stats["total_ingested"] == 5
+
+
+class TestAgentSwarmCoreEngine:
+    """Validate core logic of agent swarm orchestrator, topological wave scheduling, and retry mechanisms."""
+
+    def test_plan_dag_validation_and_cycle_detection(self) -> None:
+        from production_rag_evaluation.agents.models import (
+            AgentRole,
+            WorkflowPlan,
+            WorkflowStep,
+        )
+
+        # Valid DAG
+        step1 = WorkflowStep(step_id="s1", name="s1", agent_role=AgentRole.PLANNER)
+        step2 = WorkflowStep(
+            step_id="s2", name="s2", agent_role=AgentRole.AUDITOR, dependencies=["s1"]
+        )
+        plan_valid = WorkflowPlan(query_id="q1", steps=[step1, step2])
+        valid, err = plan_valid.validate_dag()
+        assert valid is True
+        assert err is None
+        assert len(plan_valid.get_independent_steps()) == 1
+        assert plan_valid.get_independent_steps()[0].step_id == "s1"
+
+        # Invalid DAG with missing dependency
+        step_missing = WorkflowStep(
+            step_id="s3", name="s3", agent_role=AgentRole.AUDITOR, dependencies=["unknown"]
+        )
+        plan_missing = WorkflowPlan(query_id="q1", steps=[step_missing])
+        valid, err = plan_missing.validate_dag()
+        assert valid is False
+        assert "references unknown dependency" in (err or "")
+
+        # Invalid DAG with cycle
+        step_c1 = WorkflowStep(
+            step_id="c1", name="c1", agent_role=AgentRole.AUDITOR, dependencies=["c2"]
+        )
+        step_c2 = WorkflowStep(
+            step_id="c2", name="c2", agent_role=AgentRole.EVALUATOR, dependencies=["c1"]
+        )
+        plan_cycle = WorkflowPlan(query_id="q1", steps=[step_c1, step_c2])
+        valid, err = plan_cycle.validate_dag()
+        assert valid is False
+        assert "Cycle detected" in (err or "")
+
+    def test_orchestrator_parallel_wave_execution(
+        self, sample_chunk_apple: DocumentChunk
+    ) -> None:
+        from production_rag_evaluation.agents import (
+            AgentWorkflowConfig,
+            create_default_orchestrator,
+        )
+        from production_rag_evaluation.agents.models import WorkflowStatus
+
+        cfg = AgentWorkflowConfig(concurrency_limit=4)
+        orch = create_default_orchestrator(config=cfg)
+
+        citation = Citation(
+            chunk_id=sample_chunk_apple.chunk_id,
+            quote="$391.0 billion",
+        )
+        q = RAGQuery(query_id="q-wave", ticker="AAPL", query_text="What were Apple's net sales?")
+        resp = RAGResponse(
+            query_id="q-wave",
+            generated_answer="Apple reported net sales of $391.0 billion in fiscal year 2024.",
+            retrieved_chunks=[sample_chunk_apple],
+            citations=[citation],
+        )
+
+        plan = orch.create_plan(q, resp)
+        waves = orch._build_execution_waves(plan)
+        # First wave should contain auditor and evaluator in parallel
+        assert len(waves) >= 3
+        wave1_roles = {s.agent_role for s in waves[0]}
+        assert "auditor" in [r.value for r in wave1_roles]
+        assert "evaluator" in [r.value for r in wave1_roles]
+
+        res = orch.execute_workflow(q, resp, plan=plan)
+        assert res.status == WorkflowStatus.COMPLETED
+        assert res.metrics is not None
+        assert res.risk_metrics is not None
+        assert "composite_health_score" in res.step_results["synthesis_and_reporting"]
+        assert res.step_results["synthesis_and_reporting"]["composite_health_score"] > 0.0
+
+    def test_orchestrator_halt_on_high_severity_hallucination(
+        self, sample_chunk_apple: DocumentChunk
+    ) -> None:
+        from production_rag_evaluation.agents import (
+            AgentWorkflowConfig,
+            create_default_orchestrator,
+        )
+        from production_rag_evaluation.agents.models import WorkflowStatus
+
+        cfg = AgentWorkflowConfig(halt_on_high_severity_hallucination=True)
+        orch = create_default_orchestrator(config=cfg)
+
+        # Distort number severely: 450 billion instead of 391.0 billion
+        q = RAGQuery(query_id="q-halt", ticker="AAPL", query_text="Net sales?")
+        resp = RAGResponse(
+            query_id="q-halt",
+            generated_answer="Apple reported net sales of $450.0 billion in fiscal year 2024.",
+            retrieved_chunks=[sample_chunk_apple],
+        )
+
+        res = orch.execute_workflow(q, resp)
+        assert res.status == WorkflowStatus.FAILED
+        assert "Critical hallucination detected" in (res.error or "")
+
+    def test_orchestrator_step_retry_resilience(self, monkeypatch) -> None:
+        from production_rag_evaluation.agents import (
+            AgentRegistry,
+            AgentSwarmOrchestrator,
+            AgentWorkflowConfig,
+            BaseAgent,
+        )
+        from production_rag_evaluation.agents.models import AgentRole, WorkflowStatus, WorkflowStep
+
+        cfg = AgentWorkflowConfig(auto_retry_failed_steps=True, max_retries=2)
+        reg = AgentRegistry()
+
+        attempts = 0
+
+        class FlakyAgent(BaseAgent):
+            def __init__(self):
+                super().__init__(name="flaky-agent", role=AgentRole.EVALUATOR)
+
+            def execute(self, step: WorkflowStep, context: dict) -> dict:
+                nonlocal attempts
+                attempts += 1
+                if attempts < 2:
+                    raise RuntimeError("Transient connection spike")
+                return {"status": "ok", "metrics": None}
+
+        flaky = FlakyAgent()
+        reg.register(flaky)
+        orch = AgentSwarmOrchestrator(registry=reg, config=cfg)
+
+        step = WorkflowStep(name="flaky_step", agent_role=AgentRole.EVALUATOR)
+        executed_step, out, exc = orch._execute_step_with_retry(step, context={})
+
+        assert attempts == 2
+        assert exc is None
+        assert executed_step.status == WorkflowStatus.COMPLETED
+        assert out == {"status": "ok", "metrics": None}
+
+    def test_agent_registry_lifecycle_and_inbox(self) -> None:
+        from production_rag_evaluation.agents.base import AgentRegistry
+        from production_rag_evaluation.agents.models import AgentStatus
+        from production_rag_evaluation.agents.specialized import EvaluatorAgent, PlannerAgent
+
+        reg = AgentRegistry()
+        p = PlannerAgent()
+        e = EvaluatorAgent()
+        reg.register(p)
+        reg.register(e)
+
+        assert len(reg) == 2
+        assert "planner-agent" in reg
+        assert reg.get("planner-agent") is p
+
+        # Test message exchange
+        msg = p.send_message("evaluator-agent", "Please evaluate query", {"priority": "high"})
+        e.receive_message(msg)
+        assert len(e.inbox) == 1
+        assert e.inbox[0].content == "Please evaluate query"
+
+        # Test reset
+        e.status = AgentStatus.BUSY
+        e.reset()
+        assert e.status == AgentStatus.IDLE
+        assert len(e.inbox) == 0
+
+        # Test unregister
+        removed = reg.unregister("planner-agent")
+        assert removed is p
+        assert len(reg) == 1
+        active = reg.get_active_agents()
+        assert len(active) == 1
+        assert active[0].name == "evaluator-agent"
+
+    def test_orchestrator_conditional_step_and_dependency_skip(
+        self, sample_chunk_apple: DocumentChunk
+    ) -> None:
+        from production_rag_evaluation.agents import (
+            create_default_orchestrator,
+        )
+        from production_rag_evaluation.agents.models import (
+            AgentRole,
+            StepExecutionMode,
+            WorkflowPlan,
+            WorkflowStatus,
+            WorkflowStep,
+        )
+
+        orch = create_default_orchestrator()
+
+        q = RAGQuery(query_id="q-cond", ticker="AAPL", query_text="Net sales?")
+        resp = RAGResponse(
+            query_id="q-cond",
+            generated_answer="Apple reported net sales of $391.0 billion in fiscal year 2024.",
+            retrieved_chunks=[sample_chunk_apple],
+        )
+
+        # Build plan with a conditional step whose condition evaluates to False
+        step_cond = WorkflowStep(
+            step_id="step_cond",
+            name="conditional_step",
+            agent_role=AgentRole.AUDITOR,
+            mode=StepExecutionMode.CONDITIONAL,
+            inputs={"condition": False},
+        )
+        step_dependent = WorkflowStep(
+            step_id="step_dep",
+            name="dependent_step",
+            agent_role=AgentRole.SYNTHESIZER,
+            dependencies=["step_cond"],
+        )
+        plan = WorkflowPlan(query_id="q-cond", steps=[step_cond, step_dependent])
+
+        res = orch.execute_workflow(q, resp, plan=plan)
+        assert res.step_results == {}
+        assert step_cond.status == WorkflowStatus.SKIPPED
+        assert step_dependent.status == WorkflowStatus.SKIPPED
+
+    def test_orchestrator_build_execution_order_and_message_routing(self) -> None:
+        from production_rag_evaluation.agents import create_default_orchestrator
+        from production_rag_evaluation.agents.models import (
+            AgentMessage,
+            AgentRole,
+            WorkflowPlan,
+            WorkflowStep,
+        )
+
+        orch = create_default_orchestrator()
+        s1 = WorkflowStep(step_id="s1", name="step1", agent_role=AgentRole.PLANNER)
+        s2 = WorkflowStep(
+            step_id="s2", name="step2", agent_role=AgentRole.EVALUATOR, dependencies=["s1"]
+        )
+        plan = WorkflowPlan(query_id="q-order", steps=[s2, s1])
+        order = orch._build_execution_order(plan)
+        assert len(order) == 2
+        assert order[0].step_id == "s1"
+        assert order[1].step_id == "s2"
+
+        msg = AgentMessage(
+            sender="planner-agent",
+            receiver="evaluator-agent",
+            role=AgentRole.PLANNER,
+            content="route test",
+        )
+        orch.route_messages([msg])
+        eval_agent = orch.registry.get("evaluator-agent")
+        assert eval_agent is not None
+        assert len(eval_agent.inbox) > 0
+        assert eval_agent.inbox[-1].content == "route test"
+
+    def test_auditor_and_evaluator_agent_modes(
+        self, sample_chunk_apple: DocumentChunk
+    ) -> None:
+        from production_rag_evaluation.agents.models import AgentRole, WorkflowStep
+        from production_rag_evaluation.agents.specialized import AuditorAgent, EvaluatorAgent
+
+        auditor = AuditorAgent()
+        evaluator = EvaluatorAgent()
+
+        q = RAGQuery(query_id="q-mode", ticker="AAPL", query_text="Sales?")
+        resp = RAGResponse(
+            query_id="q-mode",
+            generated_answer="Apple reported net sales of $391.0 billion in fiscal year 2024.",
+            retrieved_chunks=[sample_chunk_apple],
+        )
+
+        # Test FAST mode on auditor
+        step_fast = WorkflowStep(name="audit_fast", agent_role=AgentRole.AUDITOR, inputs={"mode": "FAST"})
+        context = {"query": q, "response": resp, "messages": []}
+        res_audit = auditor.execute(step_fast, context)
+        assert res_audit["finding_count"] == 0
+        assert res_audit["has_critical_findings"] is False
+        assert len(context["messages"]) == 1
+
+        # Test Evaluator execution
+        step_eval = WorkflowStep(name="eval_core", agent_role=AgentRole.EVALUATOR, inputs={"mode": "FAST"})
+        res_eval = evaluator.execute(step_eval, context)
+        assert res_eval["overall_pass"] is True
+        assert len(context["messages"]) == 2
+
+
