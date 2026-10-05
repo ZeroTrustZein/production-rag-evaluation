@@ -73,6 +73,7 @@ class AgentSwarmOrchestrator:
     ) -> WorkflowPlan:
         """Generate structured execution plan using the planner agent."""
         planners = self.registry.get_by_role(AgentRole.PLANNER)
+        planner: BaseAgent
         if not planners:
             planner = PlannerAgent()
             self.registry.register(planner)

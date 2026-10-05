@@ -1,6 +1,9 @@
 """Domain models, schemas, and protocol interfaces."""
 
 from production_rag_evaluation.models.interfaces import (
+    AgentProtocol,
+    AgentRegistryProtocol,
+    AgentWorkflowOrchestratorProtocol,
     EvaluationFeatureHandlerProtocol,
     EvaluatorProtocol,
     FeatureCompactionProtocol,
@@ -9,9 +12,11 @@ from production_rag_evaluation.models.interfaces import (
     FeatureStoreProtocol,
     FinancialRiskEngineProtocol,
     HallucinationDetectorProtocol,
+    MCPIntegrationHandlerProtocol,
     MCPPromptRegistryProtocol,
     MCPResourceRegistryProtocol,
     MCPServerProtocol,
+    MCPSessionHandlerProtocol,
     MCPToolRegistryProtocol,
     MonteCarloStressTesterProtocol,
     RiskTelemetryCollectorProtocol,
@@ -73,6 +78,9 @@ __all__ = [
     "TelemetryAlert",
     "TelemetryReport",
     # Protocols
+    "AgentProtocol",
+    "AgentRegistryProtocol",
+    "AgentWorkflowOrchestratorProtocol",
     "EvaluationFeatureHandlerProtocol",
     "EvaluatorProtocol",
     "FeatureCompactionProtocol",
@@ -81,7 +89,9 @@ __all__ = [
     "FeatureStoreProtocol",
     "FinancialRiskEngineProtocol",
     "HallucinationDetectorProtocol",
+    "MCPIntegrationHandlerProtocol",
     "MCPServerProtocol",
+    "MCPSessionHandlerProtocol",
     "MCPPromptRegistryProtocol",
     "MCPResourceRegistryProtocol",
     "MCPToolRegistryProtocol",
