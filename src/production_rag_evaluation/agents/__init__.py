@@ -7,6 +7,12 @@ from production_rag_evaluation.agents.base import (
     BaseAgent,
     get_default_agent_registry,
 )
+from production_rag_evaluation.agents.handlers import (
+    AgentMessageBroker,
+    AgentWorkflowIntegrationHandler,
+    WorkflowEventDispatcher,
+    WorkflowTelemetryBridge,
+)
 from production_rag_evaluation.agents.models import (
     AgentMessage,
     AgentRole,
@@ -32,11 +38,13 @@ from production_rag_evaluation.agents.specialized import (
 
 __all__ = [
     "AgentMessage",
+    "AgentMessageBroker",
     "AgentRegistry",
     "AgentRole",
     "AgentStatus",
     "AgentSwarmOrchestrator",
     "AgentWorkflowConfig",
+    "AgentWorkflowIntegrationHandler",
     "AuditorAgent",
     "BaseAgent",
     "EvaluatorAgent",
@@ -44,10 +52,12 @@ __all__ = [
     "RiskAnalystAgent",
     "StepExecutionMode",
     "SynthesizerAgent",
+    "WorkflowEventDispatcher",
     "WorkflowExecutionResult",
     "WorkflowPlan",
     "WorkflowStatus",
     "WorkflowStep",
+    "WorkflowTelemetryBridge",
     "create_default_orchestrator",
     "get_default_agent_registry",
 ]

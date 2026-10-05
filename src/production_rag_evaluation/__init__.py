@@ -5,11 +5,13 @@ __author__ = "Portfolio Automation"
 
 from production_rag_evaluation.agents import (
     AgentMessage,
+    AgentMessageBroker,
     AgentRegistry,
     AgentRole,
     AgentStatus,
     AgentSwarmOrchestrator,
     AgentWorkflowConfig,
+    AgentWorkflowIntegrationHandler,
     AuditorAgent,
     BaseAgent,
     EvaluatorAgent,
@@ -17,10 +19,12 @@ from production_rag_evaluation.agents import (
     RiskAnalystAgent,
     StepExecutionMode,
     SynthesizerAgent,
+    WorkflowEventDispatcher,
     WorkflowExecutionResult,
     WorkflowPlan,
     WorkflowStatus,
     WorkflowStep,
+    WorkflowTelemetryBridge,
     create_default_orchestrator,
     get_default_agent_registry,
 )
@@ -105,8 +109,10 @@ from production_rag_evaluation.mcp.tools import (
     get_default_tool_registry,
 )
 from production_rag_evaluation.models.interfaces import (
+    AgentMessageBrokerProtocol,
     AgentProtocol,
     AgentRegistryProtocol,
+    AgentWorkflowIntegrationHandlerProtocol,
     AgentWorkflowOrchestratorProtocol,
     EvaluationFeatureHandlerProtocol,
     EvaluatorProtocol,
@@ -126,6 +132,7 @@ from production_rag_evaluation.models.interfaces import (
     RiskTelemetryCollectorProtocol,
     SemanticCacheProtocol,
     StreamingPipelineProtocol,
+    WorkflowEventDispatcherProtocol,
 )
 from production_rag_evaluation.models.schemas import (
     AlertSeverity,
@@ -246,11 +253,13 @@ __all__ = [
     "ToolExecutionStats",
     # Agent Workflow & Swarm Orchestration
     "AgentMessage",
+    "AgentMessageBroker",
     "AgentRegistry",
     "AgentRole",
     "AgentStatus",
     "AgentSwarmOrchestrator",
     "AgentWorkflowConfig",
+    "AgentWorkflowIntegrationHandler",
     "AuditorAgent",
     "BaseAgent",
     "EvaluatorAgent",
@@ -258,15 +267,19 @@ __all__ = [
     "RiskAnalystAgent",
     "StepExecutionMode",
     "SynthesizerAgent",
+    "WorkflowEventDispatcher",
     "WorkflowExecutionResult",
     "WorkflowPlan",
     "WorkflowStatus",
     "WorkflowStep",
+    "WorkflowTelemetryBridge",
     "create_default_orchestrator",
     "get_default_agent_registry",
     # Protocols
+    "AgentMessageBrokerProtocol",
     "AgentProtocol",
     "AgentRegistryProtocol",
+    "AgentWorkflowIntegrationHandlerProtocol",
     "AgentWorkflowOrchestratorProtocol",
     "EvaluationFeatureHandlerProtocol",
     "EvaluatorProtocol",
@@ -286,4 +299,5 @@ __all__ = [
     "RiskTelemetryCollectorProtocol",
     "SemanticCacheProtocol",
     "StreamingPipelineProtocol",
+    "WorkflowEventDispatcherProtocol",
 ]

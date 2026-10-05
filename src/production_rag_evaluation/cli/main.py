@@ -12,6 +12,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from production_rag_evaluation.agents.models import (
+    AgentWorkflowConfig,
+    WorkflowStatus,
+)
+from production_rag_evaluation.agents.orchestrator import create_default_orchestrator
 from production_rag_evaluation.core.cache import SemanticCache
 from production_rag_evaluation.core.evaluator import RAGEvaluator
 from production_rag_evaluation.core.hallucination import HallucinationDetector
@@ -1395,3 +1400,342 @@ def feature_store_drift_cmd(
         )
 
     console.print(table)
+
+
+# =====================================================================
+# AGENT SWARM WORKFLOW CLI COMMAND GROUP
+# =====================================================================
+
+
+@cli.group(name="swarm")
+def swarm_group() -> None:
+    """Multi-agent swarm orchestration and DAG workflow evaluation commands."""
+    pass
+
+
+# Register alias 'agent' for swarm command group
+cli.add_command(swarm_group, name="agent")
+
+
+@swarm_group.command(name="list-agents")
+@click.option("--json-out", is_flag=True, help="Output agents list as raw JSON.")
+def swarm_list_agents_cmd(json_out: bool) -> None:
+    """List all registered specialized agents in the swarm registry."""
+    orch = create_default_orchestrator()
+    agents = orch.registry.list_agents()
+
+    if json_out:
+        click.echo(json.dumps(agents, indent=2))
+        return
+
+    table = Table(title="Registered Swarm Agents")
+    table.add_column("Agent Name", style="cyan", no_wrap=True)
+    table.add_column("Role", style="magenta")
+    table.add_column("Status", style="green")
+    table.add_column("Inbox Count", justify="right")
+    table.add_column("Last Exec (ms)", justify="right")
+
+    for a in agents:
+        table.add_row(
+            a.get("name", "unknown"),
+            a.get("role", "unknown"),
+            a.get("status", "unknown"),
+            str(a.get("inbox_count", 0)),
+            f"{a.get('last_execution_time_ms', 0.0):.2f}",
+        )
+
+    console.print(table)
+
+
+@swarm_group.command(name="plan")
+@click.option("-q", "--query", required=True, help="Financial query text or path to text file.")
+@click.option("-a", "--answer", required=True, help="Generated answer text or path to text file.")
+@click.option(
+    "-c",
+    "--context",
+    required=True,
+    help="Retrieved context snippet, raw text or path to file.",
+)
+@click.option("-t", "--ticker", default="AAPL", help="Stock ticker symbol (default: AAPL).")
+@click.option("-p", "--period", default="FY2024", help="Reporting period (default: FY2024).")
+@click.option(
+    "-m",
+    "--mode",
+    type=click.Choice(["fast", "thorough", "stress"], case_sensitive=False),
+    default="thorough",
+    help="Evaluation mode (default: thorough).",
+)
+@click.option(
+    "-r",
+    "--returns",
+    default=None,
+    help="Comma-separated decimal daily returns for risk agent (or file path).",
+)
+@click.option("--json-out", is_flag=True, help="Output generated workflow plan as raw JSON.")
+def swarm_plan_cmd(
+    query: str,
+    answer: str,
+    context: str,
+    ticker: str,
+    period: str,
+    mode: str,
+    returns: Optional[str],
+    json_out: bool,
+) -> None:
+    """Inspect the topological DAG execution plan without executing."""
+    query_text = _read_text_or_file(query)
+    answer_text = _read_text_or_file(answer)
+    context_text = _read_text_or_file(context)
+    returns_arr = _parse_float_array(returns)
+    eval_mode = EvaluationMode[mode.upper()]
+
+    q = RAGQuery(
+        query_id="cli-swarm-q1",
+        query_text=query_text,
+        ticker=ticker,
+        period=period,
+    )
+    chunk = DocumentChunk(
+        chunk_id="cli-swarm-c1",
+        text=context_text,
+        doc_type=DocumentType.SEC_10K,
+        ticker=ticker,
+        period=period,
+    )
+    resp = RAGResponse(
+        query_id="cli-swarm-q1",
+        generated_answer=answer_text,
+        retrieved_chunks=[chunk],
+    )
+
+    orch = create_default_orchestrator()
+    plan = orch.create_plan(query=q, response=resp, returns=returns_arr, evaluation_mode=eval_mode)
+
+    if json_out:
+        click.echo(plan.model_dump_json(indent=2))
+        return
+
+    console.print(
+        Panel.fit(
+            f"[bold]Swarm Workflow DAG Plan[/bold] | Plan ID: [cyan]{plan.plan_id}[/cyan] | Steps: [magenta]{len(plan.steps)}[/magenta]",
+            border_style="blue",
+        )
+    )
+
+    table = Table(title="Topological Execution Steps")
+    table.add_column("Step ID", style="dim", no_wrap=True)
+    table.add_column("Step Name", style="cyan")
+    table.add_column("Agent Role", style="magenta")
+    table.add_column("Mode", style="yellow")
+    table.add_column("Dependencies", style="green")
+
+    for s in plan.steps:
+        deps_str = ", ".join(s.dependencies) if s.dependencies else "[dim]None[/dim]"
+        table.add_row(
+            s.step_id[:8] + "...",
+            s.name,
+            s.agent_role.value,
+            s.mode.value,
+            deps_str,
+        )
+
+    console.print(table)
+
+
+@swarm_group.command(name="run")
+@click.option("-q", "--query", required=True, help="Financial query text or path to text file.")
+@click.option("-a", "--answer", required=True, help="Generated answer text or path to text file.")
+@click.option(
+    "-c",
+    "--context",
+    required=True,
+    help="Retrieved context snippet, raw text or path to file.",
+)
+@click.option("-t", "--ticker", default="AAPL", help="Stock ticker symbol (default: AAPL).")
+@click.option("-p", "--period", default="FY2024", help="Reporting period (default: FY2024).")
+@click.option(
+    "-m",
+    "--mode",
+    type=click.Choice(["fast", "thorough", "stress"], case_sensitive=False),
+    default="thorough",
+    help="Evaluation mode (default: thorough).",
+)
+@click.option(
+    "-r",
+    "--returns",
+    default=None,
+    help="Comma-separated decimal daily returns for financial risk agent (or file path).",
+)
+@click.option(
+    "--concurrency",
+    default=5,
+    type=click.IntRange(1, 20),
+    help="Maximum parallel execution concurrency limit (default: 5).",
+)
+@click.option(
+    "--halt-on-hallucination",
+    is_flag=True,
+    help="Halt workflow immediately if critical/high severity hallucination is detected.",
+)
+@click.option(
+    "--auto-retry",
+    is_flag=True,
+    help="Automatically retry failed agent workflow steps.",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(dir_okay=False, writable=True, path_type=Path),
+    default=None,
+    help="Optional file path to write results JSON to.",
+)
+@click.option("--json-out", is_flag=True, help="Output workflow execution result as raw JSON.")
+def swarm_run_cmd(
+    query: str,
+    answer: str,
+    context: str,
+    ticker: str,
+    period: str,
+    mode: str,
+    returns: Optional[str],
+    concurrency: int,
+    halt_on_hallucination: bool,
+    auto_retry: bool,
+    output: Optional[Path],
+    json_out: bool,
+) -> None:
+    """Execute end-to-end multi-agent swarm evaluation workflow."""
+    query_text = _read_text_or_file(query)
+    answer_text = _read_text_or_file(answer)
+    context_text = _read_text_or_file(context)
+    returns_arr = _parse_float_array(returns)
+    eval_mode = EvaluationMode[mode.upper()]
+
+    q = RAGQuery(
+        query_id="cli-swarm-q1",
+        query_text=query_text,
+        ticker=ticker,
+        period=period,
+    )
+    chunk = DocumentChunk(
+        chunk_id="cli-swarm-c1",
+        text=context_text,
+        doc_type=DocumentType.SEC_10K,
+        ticker=ticker,
+        period=period,
+    )
+    resp = RAGResponse(
+        query_id="cli-swarm-q1",
+        generated_answer=answer_text,
+        retrieved_chunks=[chunk],
+    )
+
+    config = AgentWorkflowConfig(
+        concurrency_limit=concurrency,
+        halt_on_high_severity_hallucination=halt_on_hallucination,
+        auto_retry_failed_steps=auto_retry,
+    )
+    orchestrator = create_default_orchestrator(config=config)
+    plan = orchestrator.create_plan(
+        query=q,
+        response=resp,
+        returns=returns_arr,
+        evaluation_mode=eval_mode,
+    )
+
+    result = orchestrator.execute_workflow(
+        query=q,
+        response=resp,
+        returns=returns_arr,
+        plan=plan,
+    )
+
+    if output is not None:
+        output.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+
+    if json_out:
+        click.echo(result.model_dump_json(indent=2))
+        return
+
+    status_color = "green" if result.status == WorkflowStatus.COMPLETED else "red"
+    console.print(
+        Panel.fit(
+            f"[bold]Swarm Evaluation Workflow[/bold] | Status: [{status_color}]{result.status.value}[/{status_color}] | Duration: [magenta]{result.total_execution_time_ms:.1f}ms[/magenta]",
+            border_style=status_color,
+        )
+    )
+
+    # Step Execution Summary
+    step_table = Table(title="Workflow Step Execution Summary")
+    step_table.add_column("Step Name", style="cyan")
+    step_table.add_column("Agent Role", style="magenta")
+    step_table.add_column("Status", style="bold")
+    step_table.add_column("Duration (ms)", justify="right")
+
+    for step in result.plan.steps:
+        s_res = result.step_results.get(step.step_id, {})
+        s_status = s_res.get("status", step.status.value)
+        s_dur = s_res.get("execution_time_ms", step.execution_time_ms)
+        color = "green" if s_status == "completed" else "yellow" if s_status == "skipped" else "red"
+        step_table.add_row(
+            step.name,
+            step.agent_role.value,
+            f"[{color}]{s_status}[/{color}]",
+            f"{s_dur:.1f}",
+        )
+    console.print(step_table)
+
+    # Core Metrics Breakdown
+    if result.metrics:
+        m_table = Table(title="Evaluator Agent Metrics")
+        m_table.add_column("Metric", style="cyan")
+        m_table.add_column("Score", style="bold magenta", justify="right")
+        m_table.add_row("Faithfulness", f"{result.metrics.faithfulness_score:.2%}")
+        m_table.add_row("Answer Relevance", f"{result.metrics.answer_relevance_score:.2%}")
+        m_table.add_row("Context Recall", f"{result.metrics.context_recall_score:.2%}")
+        m_table.add_row("Context Precision", f"{result.metrics.context_precision_score:.2%}")
+        m_table.add_row("Overall Pass", "[green]PASS[/green]" if result.metrics.overall_pass else "[red]FAIL[/red]")
+        console.print(m_table)
+
+    # Hallucination Findings Breakdown
+    if result.findings:
+        f_table = Table(title=f"Auditor Agent Findings ({len(result.findings)} Detected)")
+        f_table.add_column("Type", style="cyan")
+        f_table.add_column("Severity", style="bold red")
+        f_table.add_column("Claim Text", style="magenta")
+        for f in result.findings:
+            f_table.add_row(
+                f.finding_type.value,
+                f.severity.value,
+                f.claim_text[:60] + "..." if len(f.claim_text) > 60 else f.claim_text,
+            )
+        console.print(f_table)
+
+    # Risk Metrics Breakdown
+    if result.risk_metrics:
+        r_table = Table(title="Risk Analyst Agent Metrics")
+        r_table.add_column("Metric", style="cyan")
+        r_table.add_column("Value", style="bold magenta", justify="right")
+        r_table.add_row("Annualized Volatility", f"{result.risk_metrics.annualized_volatility:.2%}")
+        r_table.add_row("Value at Risk (95%)", f"{result.risk_metrics.var_95:.2%}")
+        r_table.add_row("Conditional VaR (95%)", f"{result.risk_metrics.cvar_95:.2%}")
+        r_table.add_row("Max Drawdown", f"{result.risk_metrics.max_drawdown:.2%}")
+        console.print(r_table)
+
+    # Synthesis & Recommendations
+    if result.summary:
+        console.print(
+            Panel(
+                f"[bold cyan]Synthesis Summary:[/bold cyan]\n{result.summary}",
+                border_style="cyan",
+            )
+        )
+    if result.recommendations:
+        rec_text = "\n".join(f"• {r}" for r in result.recommendations)
+        console.print(
+            Panel(
+                f"[bold yellow]Strategic Recommendations:[/bold yellow]\n{rec_text}",
+                border_style="yellow",
+            )
+        )
+

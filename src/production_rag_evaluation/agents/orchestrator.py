@@ -49,9 +49,13 @@ class AgentSwarmOrchestrator:
         self,
         registry: Optional[AgentRegistry] = None,
         config: Optional[AgentWorkflowConfig] = None,
+        event_dispatcher: Optional[Any] = None,
+        message_broker: Optional[Any] = None,
     ) -> None:
         self.registry = registry or get_default_agent_registry()
         self.config = config or AgentWorkflowConfig()
+        self.event_dispatcher = event_dispatcher
+        self.message_broker = message_broker
         self._ensure_default_agents()
 
     def _ensure_default_agents(self) -> None:
@@ -169,10 +173,13 @@ class AgentSwarmOrchestrator:
 
     def route_messages(self, messages: List[AgentMessage]) -> None:
         """Route inter-agent messages to recipient agent inboxes."""
-        for msg in messages:
-            target_agent = self.registry.get(msg.receiver)
-            if target_agent is not None:
-                target_agent.receive_message(msg)
+        if self.message_broker is not None:
+            self.message_broker.route_batch(messages, self.registry)
+        else:
+            for msg in messages:
+                target_agent = self.registry.get(msg.receiver)
+                if target_agent is not None:
+                    target_agent.receive_message(msg)
 
     def execute_workflow(
         self,
@@ -334,13 +341,22 @@ class AgentSwarmOrchestrator:
 
 def create_default_orchestrator(
     config: Optional[AgentWorkflowConfig] = None,
+    registry: Optional[AgentRegistry] = None,
+    event_dispatcher: Optional[Any] = None,
+    message_broker: Optional[Any] = None,
 ) -> AgentSwarmOrchestrator:
     """Factory creating an orchestrator loaded with default swarm agents."""
-    registry = AgentRegistry()
-    registry.register(PlannerAgent())
-    registry.register(EvaluatorAgent())
-    registry.register(AuditorAgent())
-    registry.register(RiskAnalystAgent())
-    registry.register(SynthesizerAgent())
-    return AgentSwarmOrchestrator(registry=registry, config=config)
+    if registry is None:
+        registry = AgentRegistry()
+        registry.register(PlannerAgent())
+        registry.register(EvaluatorAgent())
+        registry.register(AuditorAgent())
+        registry.register(RiskAnalystAgent())
+        registry.register(SynthesizerAgent())
+    return AgentSwarmOrchestrator(
+        registry=registry,
+        config=config,
+        event_dispatcher=event_dispatcher,
+        message_broker=message_broker,
+    )
 

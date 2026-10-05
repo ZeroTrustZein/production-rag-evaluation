@@ -1,8 +1,10 @@
 """Domain models, schemas, and protocol interfaces."""
 
 from production_rag_evaluation.models.interfaces import (
+    AgentMessageBrokerProtocol,
     AgentProtocol,
     AgentRegistryProtocol,
+    AgentWorkflowIntegrationHandlerProtocol,
     AgentWorkflowOrchestratorProtocol,
     EvaluationFeatureHandlerProtocol,
     EvaluatorProtocol,
@@ -22,6 +24,7 @@ from production_rag_evaluation.models.interfaces import (
     RiskTelemetryCollectorProtocol,
     SemanticCacheProtocol,
     StreamingPipelineProtocol,
+    WorkflowEventDispatcherProtocol,
 )
 from production_rag_evaluation.models.schemas import (
     AlertSeverity,
@@ -78,8 +81,10 @@ __all__ = [
     "TelemetryAlert",
     "TelemetryReport",
     # Protocols
+    "AgentMessageBrokerProtocol",
     "AgentProtocol",
     "AgentRegistryProtocol",
+    "AgentWorkflowIntegrationHandlerProtocol",
     "AgentWorkflowOrchestratorProtocol",
     "EvaluationFeatureHandlerProtocol",
     "EvaluatorProtocol",
@@ -99,4 +104,5 @@ __all__ = [
     "RiskTelemetryCollectorProtocol",
     "SemanticCacheProtocol",
     "StreamingPipelineProtocol",
+    "WorkflowEventDispatcherProtocol",
 ]

@@ -10,6 +10,11 @@ from production_rag_evaluation.agents.base import (
     BaseAgent,
     get_default_agent_registry,
 )
+from production_rag_evaluation.agents.handlers import (
+    AgentMessageBroker,
+    AgentWorkflowIntegrationHandler,
+    WorkflowEventDispatcher,
+)
 from production_rag_evaluation.agents.models import (
     AgentMessage,
     AgentRole,
@@ -79,8 +84,10 @@ from production_rag_evaluation.mcp.tools import (
     get_default_tool_registry,
 )
 from production_rag_evaluation.models.interfaces import (
+    AgentMessageBrokerProtocol,
     AgentProtocol,
     AgentRegistryProtocol,
+    AgentWorkflowIntegrationHandlerProtocol,
     AgentWorkflowOrchestratorProtocol,
     EvaluatorProtocol,
     FeatureStoreProtocol,
@@ -94,6 +101,7 @@ from production_rag_evaluation.models.interfaces import (
     RiskTelemetryCollectorProtocol,
     SemanticCacheProtocol,
     StreamingPipelineProtocol,
+    WorkflowEventDispatcherProtocol,
 )
 from production_rag_evaluation.models.schemas import (
     AlertSeverity,
