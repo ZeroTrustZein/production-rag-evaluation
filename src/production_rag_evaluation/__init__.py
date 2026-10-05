@@ -3,6 +3,27 @@
 __version__ = "0.1.0"
 __author__ = "Portfolio Automation"
 
+from production_rag_evaluation.agents import (
+    AgentMessage,
+    AgentRegistry,
+    AgentRole,
+    AgentStatus,
+    AgentSwarmOrchestrator,
+    AgentWorkflowConfig,
+    AuditorAgent,
+    BaseAgent,
+    EvaluatorAgent,
+    PlannerAgent,
+    RiskAnalystAgent,
+    StepExecutionMode,
+    SynthesizerAgent,
+    WorkflowExecutionResult,
+    WorkflowPlan,
+    WorkflowStatus,
+    WorkflowStep,
+    create_default_orchestrator,
+    get_default_agent_registry,
+)
 from production_rag_evaluation.core.cache import SemanticCache
 from production_rag_evaluation.core.evaluator import RAGEvaluator
 from production_rag_evaluation.core.graph import EvaluationGraph
@@ -84,6 +105,9 @@ from production_rag_evaluation.mcp.tools import (
     get_default_tool_registry,
 )
 from production_rag_evaluation.models.interfaces import (
+    AgentProtocol,
+    AgentRegistryProtocol,
+    AgentWorkflowOrchestratorProtocol,
     EvaluationFeatureHandlerProtocol,
     EvaluatorProtocol,
     FeatureCompactionProtocol,
@@ -220,7 +244,30 @@ __all__ = [
     "MCPIntegrationHandler",
     "MCPNotificationDispatcher",
     "ToolExecutionStats",
+    # Agent Workflow & Swarm Orchestration
+    "AgentMessage",
+    "AgentRegistry",
+    "AgentRole",
+    "AgentStatus",
+    "AgentSwarmOrchestrator",
+    "AgentWorkflowConfig",
+    "AuditorAgent",
+    "BaseAgent",
+    "EvaluatorAgent",
+    "PlannerAgent",
+    "RiskAnalystAgent",
+    "StepExecutionMode",
+    "SynthesizerAgent",
+    "WorkflowExecutionResult",
+    "WorkflowPlan",
+    "WorkflowStatus",
+    "WorkflowStep",
+    "create_default_orchestrator",
+    "get_default_agent_registry",
     # Protocols
+    "AgentProtocol",
+    "AgentRegistryProtocol",
+    "AgentWorkflowOrchestratorProtocol",
     "EvaluationFeatureHandlerProtocol",
     "EvaluatorProtocol",
     "FeatureCompactionProtocol",
