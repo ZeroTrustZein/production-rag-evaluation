@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
+from production_rag_evaluation.agents.orchestrator import (
+    AgentSwarmOrchestrator,
+    create_default_orchestrator,
+)
 from production_rag_evaluation.core.cache import SemanticCache
 from production_rag_evaluation.core.evaluator import RAGEvaluator
 from production_rag_evaluation.core.hallucination import HallucinationDetector
@@ -111,6 +116,14 @@ _shared_detector: Optional[HallucinationDetector] = None
 _shared_risk_engine: Optional[FinancialRiskEngine] = None
 _shared_stress_tester: Optional[MonteCarloStressTester] = None
 _shared_semantic_cache: Optional[SemanticCache] = None
+_shared_orchestrator: Optional[AgentSwarmOrchestrator] = None
+
+
+def _get_orchestrator() -> AgentSwarmOrchestrator:
+    global _shared_orchestrator
+    if _shared_orchestrator is None:
+        _shared_orchestrator = create_default_orchestrator()
+    return _shared_orchestrator
 
 
 def _get_evaluator() -> RAGEvaluator:
@@ -486,6 +499,80 @@ def handle_rag_cache_lookup(
     }
 
 
+def handle_rag_swarm_evaluate(
+    query_text: str,
+    generated_answer: str,
+    context_chunks: Sequence[str],
+    ticker: Optional[str] = None,
+    returns: Optional[Sequence[float]] = None,
+    mode: str = "THOROUGH",
+) -> Dict[str, Any]:
+    """Execute end-to-end multi-agent swarm evaluation workflow."""
+    orchestrator = _get_orchestrator()
+    active_ticker = ticker or "DEFAULT"
+
+    chunks = []
+    for idx, c in enumerate(context_chunks):
+        if isinstance(c, DocumentChunk):
+            chunks.append(c)
+        elif isinstance(c, dict):
+            c_text = c.get("text", c.get("content", ""))
+            c_id = c.get("chunk_id", f"ctx-{idx + 1}")
+            chunks.append(
+                DocumentChunk(
+                    chunk_id=c_id,
+                    ticker=active_ticker,
+                    doc_type=DocumentType.SEC_10K,
+                    text=c_text,
+                )
+            )
+        else:
+            chunks.append(
+                DocumentChunk(
+                    chunk_id=f"chunk-{idx + 1}",
+                    ticker=active_ticker,
+                    doc_type=DocumentType.SEC_10K,
+                    text=str(c),
+                )
+            )
+
+    rag_query = RAGQuery(
+        query_id=f"query-{uuid.uuid4().hex[:8]}",
+        ticker=active_ticker,
+        query_text=query_text,
+    )
+    rag_resp = RAGResponse(
+        query_id=rag_query.query_id,
+        generated_answer=generated_answer,
+        retrieved_chunks=chunks,
+    )
+
+    returns_arr = np.array(returns, dtype=float) if returns is not None else None
+    eval_mode = (
+        EvaluationMode(mode.upper())
+        if hasattr(EvaluationMode, mode.upper())
+        else EvaluationMode.THOROUGH
+    )
+    plan = orchestrator.create_plan(
+        rag_query, rag_resp, returns=returns_arr, evaluation_mode=eval_mode
+    )
+    res = orchestrator.execute_workflow(rag_query, rag_resp, returns=returns_arr, plan=plan)
+
+    synth_res = res.step_results.get("synthesis_and_reporting", {})
+    return {
+        "workflow_id": res.workflow_id,
+        "status": res.status.value,
+        "composite_health_score": synth_res.get("composite_health_score", 0.0),
+        "recommendation": synth_res.get("decision", "PASS"),
+        "total_execution_time_ms": round(res.total_execution_time_ms, 2),
+        "steps_completed": len(res.step_results),
+        "findings_count": len(res.findings),
+        "summary": res.summary,
+        "recommendations": res.recommendations,
+        "error": res.error,
+    }
+
+
 def get_default_tool_registry() -> MCPToolRegistry:
     """Build and populate standard tool registry for production-rag-evaluation."""
     reg = MCPToolRegistry()
@@ -681,6 +768,45 @@ def get_default_tool_registry() -> MCPToolRegistry:
                 },
             },
             handler=handle_rag_cache_lookup,
+        )
+    )
+
+    reg.register(
+        MCPTool(
+            name="rag_swarm_evaluate",
+            description="Coordinate multi-agent swarm DAG workflow to perform financial evaluation, auditing, risk modeling, and synthesis.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query_text": {"type": "string", "description": "User question or prompt"},
+                    "generated_answer": {
+                        "type": "string",
+                        "description": "Candidate generated LLM answer",
+                    },
+                    "context_chunks": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Retrieved context passages or filings",
+                    },
+                    "ticker": {
+                        "type": "string",
+                        "description": "Optional asset or stock ticker (e.g. AAPL)",
+                    },
+                    "returns": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Optional historical portfolio returns",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["FAST", "BALANCED", "THOROUGH", "STRICT"],
+                        "default": "THOROUGH",
+                        "description": "Evaluation rigor mode",
+                    },
+                },
+                "required": ["query_text", "generated_answer", "context_chunks"],
+            },
+            handler=handle_rag_swarm_evaluate,
         )
     )
 

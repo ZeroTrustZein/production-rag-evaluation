@@ -1292,3 +1292,320 @@ class TestMCPSubsystems:
         assert len(batch_results) == 2
         assert "faithfulness_score" in batch_results[0]
         assert "faithfulness_score" in batch_results[1]
+
+
+class TestAgentSwarmSubsystems:
+    """Rigorous evaluation of Agent Workflow Event Dispatcher, Message Broker, Telemetry Bridge, and Integration Handler."""
+
+    def test_protocol_conformity(self) -> None:
+        from production_rag_evaluation.agents.handlers import (
+            AgentMessageBroker,
+            AgentWorkflowIntegrationHandler,
+            WorkflowEventDispatcher,
+        )
+        from production_rag_evaluation.models.interfaces import (
+            AgentMessageBrokerProtocol,
+            AgentWorkflowIntegrationHandlerProtocol,
+            WorkflowEventDispatcherProtocol,
+        )
+
+        dispatcher = WorkflowEventDispatcher()
+        assert isinstance(dispatcher, WorkflowEventDispatcherProtocol)
+
+        broker = AgentMessageBroker()
+        assert isinstance(broker, AgentMessageBrokerProtocol)
+
+        handler = AgentWorkflowIntegrationHandler()
+        assert isinstance(handler, AgentWorkflowIntegrationHandlerProtocol)
+
+    def test_event_dispatcher_pubsub_wildcard_and_clear(self) -> None:
+        from production_rag_evaluation.agents.handlers import WorkflowEventDispatcher
+
+        dispatcher = WorkflowEventDispatcher()
+        specific_events: List[Dict[str, Any]] = []
+        wildcard_events: List[Dict[str, Any]] = []
+
+        def on_step(evt: str, payload: Dict[str, Any]) -> None:
+            specific_events.append(payload)
+
+        def on_all(evt: str, payload: Dict[str, Any]) -> None:
+            wildcard_events.append({"event": evt, "payload": payload})
+
+        dispatcher.subscribe("step_completed", on_step)
+        dispatcher.subscribe("*", on_all)
+
+        assert dispatcher.get_subscribers_count("step_completed") == 1
+        assert dispatcher.get_subscribers_count("*") == 1
+
+        invoked = dispatcher.publish("step_completed", {"step_id": "s1", "outputs": {"ok": True}})
+        assert invoked == 2
+        assert len(specific_events) == 1
+        assert len(wildcard_events) == 1
+
+        # Publish an event only caught by wildcard
+        invoked2 = dispatcher.publish("workflow_started", {"workflow_id": "w1"})
+        assert invoked2 == 1
+        assert len(specific_events) == 1
+        assert len(wildcard_events) == 2
+
+        # Unsubscribe specific
+        unsub_ok = dispatcher.unsubscribe("step_completed", on_step)
+        assert unsub_ok is True
+        assert dispatcher.get_subscribers_count("step_completed") == 0
+
+        # Clear
+        dispatcher.clear()
+        assert dispatcher.get_subscribers_count("*") == 0
+
+    def test_agent_message_broker_direct_and_broadcast(self) -> None:
+        from production_rag_evaluation.agents.base import AgentRegistry
+        from production_rag_evaluation.agents.handlers import AgentMessageBroker
+        from production_rag_evaluation.agents.models import AgentMessage, AgentRole
+        from production_rag_evaluation.agents.specialized import (
+            AuditorAgent,
+            EvaluatorAgent,
+            PlannerAgent,
+        )
+
+        reg = AgentRegistry()
+        planner = PlannerAgent(name="planner-1")
+        auditor = AuditorAgent(name="auditor-1")
+        evaluator = EvaluatorAgent(name="evaluator-1")
+        reg.register(planner)
+        reg.register(auditor)
+        reg.register(evaluator)
+
+        broker = AgentMessageBroker(max_history=10)
+
+        # Direct message routing
+        msg1 = AgentMessage(
+            sender="planner-1",
+            receiver="auditor-1",
+            role=AgentRole.PLANNER,
+            content="Please inspect 10-K filing",
+        )
+        routed = broker.route_message(msg1, reg)
+        assert routed is True
+        assert len(auditor.inbox) == 1
+        assert auditor.inbox[0].content == "Please inspect 10-K filing"
+
+        # Missing agent
+        msg_missing = AgentMessage(
+            sender="planner-1",
+            receiver="non-existent-agent",
+            role=AgentRole.PLANNER,
+            content="hello",
+        )
+        routed_missing = broker.route_message(msg_missing, reg)
+        assert routed_missing is False
+
+        # Broadcast message to '*'
+        msg_broadcast = AgentMessage(
+            sender="planner-1",
+            receiver="*",
+            role=AgentRole.PLANNER,
+            content="Plan generation initiated",
+        )
+        routed_bcast = broker.route_message(msg_broadcast, reg)
+        assert routed_bcast is True
+        # Both auditor and evaluator should receive broadcast, but not planner sender
+        assert len(auditor.inbox) == 2
+        assert len(evaluator.inbox) == 1
+        assert len(planner.inbox) == 0
+
+        # History querying
+        history = broker.get_history(sender="planner-1")
+        assert len(history) == 3
+        auditor_history = broker.get_history(receiver="auditor-1")
+        assert len(auditor_history) == 1
+
+        # Clear history
+        assert broker.total_messages == 3
+        broker.clear_history()
+        assert broker.total_messages == 0
+
+    def test_workflow_telemetry_bridge(self) -> None:
+        from production_rag_evaluation.agents.handlers import WorkflowTelemetryBridge
+        from production_rag_evaluation.agents.models import (
+            WorkflowExecutionResult,
+            WorkflowPlan,
+            WorkflowStatus,
+        )
+        from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
+        from production_rag_evaluation.models.schemas import (
+            AlertSeverity,
+            HallucinationFinding,
+            Severity,
+        )
+
+        collector = RiskTelemetryCollector()
+        bridge = WorkflowTelemetryBridge(collector=collector)
+
+        # Test failure alert
+        failed_res = WorkflowExecutionResult(
+            workflow_id="w-fail",
+            status=WorkflowStatus.FAILED,
+            plan=WorkflowPlan(query_id="q1", steps=[]),
+            step_results={},
+            error="Connection timeout during simulation",
+        )
+        fail_alerts = bridge.record_workflow_result(failed_res)
+        assert len(fail_alerts) == 1
+        assert fail_alerts[0].severity == AlertSeverity.CRITICAL
+        assert "failed" in fail_alerts[0].message
+
+        # Test critical hallucination alert
+        from production_rag_evaluation.models.schemas import HallucinationType
+
+        finding = HallucinationFinding(
+            finding_type=HallucinationType.NUMERICAL_DISTORTION,
+            severity=Severity.CRITICAL,
+            claim_text="Revenue was $500B",
+            reference_text="Revenue was $391B",
+            explanation="Major distortion",
+        )
+        risk = FinancialRiskEngine().compute_all_metrics(
+            np.array([0.02, -0.15, -0.10, 0.01, -0.08, 0.03, -0.05])
+        )
+        audit_res = WorkflowExecutionResult(
+            workflow_id="w-crit",
+            status=WorkflowStatus.COMPLETED,
+            plan=WorkflowPlan(query_id="q2", steps=[]),
+            step_results={},
+            findings=[finding],
+            risk_metrics=risk,
+        )
+        alerts = bridge.record_workflow_result(audit_res)
+        assert len(alerts) == 2
+        assert any(a.severity == AlertSeverity.CRITICAL for a in alerts)
+        assert any(a.severity == AlertSeverity.WARNING for a in alerts)
+
+    def test_workflow_integration_handler_feature_store_and_telemetry(
+        self, tmp_path, sample_chunk_apple
+    ) -> None:
+        from production_rag_evaluation.agents.handlers import AgentWorkflowIntegrationHandler
+        from production_rag_evaluation.features.models import FeatureGroup
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+        from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
+        from production_rag_evaluation.models.schemas import RAGQuery, RAGResponse
+
+        store = ParquetFeatureStore(base_path=tmp_path / "agent_subsystem_store")
+        collector = RiskTelemetryCollector()
+        handler = AgentWorkflowIntegrationHandler(
+            feature_store=store,
+            telemetry_collector=collector,
+        )
+
+        q = RAGQuery(
+            query_id="q-subsys-1", ticker="AAPL", query_text="Net sales in fiscal year 2024?"
+        )
+        resp = RAGResponse(
+            query_id="q-subsys-1",
+            generated_answer="Apple reported net sales of $391.0 billion in fiscal year 2024.",
+            retrieved_chunks=[sample_chunk_apple],
+        )
+
+        res = handler.execute_and_record(q, resp)
+        assert res.status.value == "completed"
+
+        # Check feature records written
+        records = store.read_records(group=FeatureGroup.EVALUATION)
+        assert len(records) >= 1
+        assert "composite_health_score" in records[0].features
+        assert records[0].entity_id == "q-subsys-1"
+
+        # Check execution stats
+        stats = handler.get_execution_stats()
+        assert stats["total_executions"] == 1
+        assert stats["total_errors"] == 0
+        assert stats["average_latency_ms"] > 0
+
+    def test_workflow_integration_handler_caching_and_batch(self, sample_chunk_apple) -> None:
+        from production_rag_evaluation.agents.handlers import AgentWorkflowIntegrationHandler
+        from production_rag_evaluation.core.cache import SemanticCache
+        from production_rag_evaluation.models.schemas import EvaluationMode, RAGQuery, RAGResponse
+
+        cache = SemanticCache()
+        handler = AgentWorkflowIntegrationHandler(semantic_cache=cache)
+
+        q = RAGQuery(query_id="q-cache-1", ticker="AAPL", query_text="Net sales for Apple?")
+        resp = RAGResponse(
+            query_id="q-cache-1",
+            generated_answer="Apple reported net sales of $391.0 billion in fiscal year 2024.",
+            retrieved_chunks=[sample_chunk_apple],
+        )
+
+        # First run populates cache
+        res1 = handler.execute_and_record(q, resp)
+        assert res1.status.value == "completed"
+        assert len(cache) == 1
+
+        # Second run hits cache
+        hit_events: List[Dict[str, Any]] = []
+        handler.event_dispatcher.subscribe("workflow_cache_hit", lambda e, p: hit_events.append(p))
+        res2 = handler.execute_and_record(q, resp, use_cache=True)
+        assert res2.status.value == "completed"
+        assert len(hit_events) == 1
+        assert hit_events[0]["query_id"] == "q-cache-1"
+
+        # Test batch execution
+        batch_pairs = [
+            (q, resp),
+            (
+                RAGQuery(query_id="q-batch-2", ticker="AAPL", query_text="Sales overview?"),
+                resp,
+            ),
+        ]
+        batch_results = handler.handle_batch_workflow(
+            batch_pairs, evaluation_mode=EvaluationMode.FAST
+        )
+        assert len(batch_results) == 2
+        assert all(b.status.value == "completed" for b in batch_results)
+
+        # Test reset stats
+        handler.reset_stats()
+        stats = handler.get_execution_stats()
+        assert stats["total_executions"] == 0
+
+    def test_mcp_rag_swarm_evaluate_tool(self) -> None:
+        from production_rag_evaluation.mcp.tools import get_default_tool_registry
+
+        reg = get_default_tool_registry()
+        swarm_tool = reg.get("rag_swarm_evaluate")
+        assert swarm_tool is not None
+
+        tool_result = reg.call(
+            "rag_swarm_evaluate",
+            {
+                "query_text": "What was Apple's total revenue?",
+                "generated_answer": "Apple reported total revenue of $391.0 billion.",
+                "context_chunks": [
+                    "Apple Inc. reported total revenue and net sales of $391.0 billion in fiscal 2024."
+                ],
+                "ticker": "AAPL",
+                "mode": "FAST",
+            },
+        )
+        assert tool_result.isError is False
+        assert "workflow_id" in tool_result.content[0]["text"]
+        assert "composite_health_score" in tool_result.content[0]["text"]
+
+    def test_mcp_integration_handler_executes_swarm_tool(self) -> None:
+        from production_rag_evaluation.mcp.handlers import MCPIntegrationHandler
+
+        handler = MCPIntegrationHandler()
+        res = handler.execute_tool(
+            "rag_swarm_evaluate",
+            {
+                "query_text": "What were the quarterly net sales?",
+                "generated_answer": "Quarterly net sales reached $94.9 billion.",
+                "context_chunks": [
+                    "Quarterly net sales reached $94.9 billion according to the quarterly earnings release."
+                ],
+                "mode": "FAST",
+            },
+        )
+        assert res.isError is False
+        stats = handler.get_execution_stats()
+        assert "rag_swarm_evaluate" in stats["stats_by_tool"]
+        assert stats["stats_by_tool"]["rag_swarm_evaluate"]["call_count"] == 1

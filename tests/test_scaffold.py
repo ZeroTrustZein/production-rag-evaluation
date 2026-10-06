@@ -6,18 +6,36 @@ import numpy as np
 from click.testing import CliRunner
 
 from production_rag_evaluation import (
+    AgentRegistry,
+    AgentRole,
+    AgentStatus,
+    AgentSwarmOrchestrator,
+    AgentWorkflowConfig,
+    AuditorAgent,
+    BaseAgent,
+    EvaluatorAgent,
     FeatureGroup,
     FinancialRiskEngine,
     HallucinationDetector,
     MCPServer,
     MonteCarloStressTester,
     ParquetFeatureStore,
+    PlannerAgent,
     RAGEvaluator,
+    RiskAnalystAgent,
     RiskTelemetryCollector,
     SemanticCache,
+    StepExecutionMode,
     StreamingFeaturePipeline,
+    SynthesizerAgent,
+    WorkflowExecutionResult,
+    WorkflowPlan,
+    WorkflowStatus,
+    WorkflowStep,
     __version__,
+    create_default_orchestrator,
     create_mcp_server,
+    get_default_agent_registry,
 )
 from production_rag_evaluation.cli.main import cli
 from production_rag_evaluation.models.schemas import (
@@ -41,6 +59,23 @@ def test_package_metadata():
     assert StreamingFeaturePipeline is not None
     assert MCPServer is not None
     assert create_mcp_server is not None
+    assert AgentSwarmOrchestrator is not None
+    assert create_default_orchestrator is not None
+    assert AgentRegistry is not None
+    assert get_default_agent_registry is not None
+    assert BaseAgent is not None
+    assert PlannerAgent is not None
+    assert EvaluatorAgent is not None
+    assert AuditorAgent is not None
+    assert RiskAnalystAgent is not None
+    assert SynthesizerAgent is not None
+    assert AgentRole.PLANNER == "planner"
+    assert AgentStatus.IDLE == "idle"
+    assert StepExecutionMode.SEQUENTIAL == "sequential"
+    assert AgentWorkflowConfig is not None
+    assert WorkflowPlan is not None
+    assert WorkflowStep is not None
+    assert WorkflowExecutionResult is not None
 
 
 def test_schemas_instantiation(sample_chunk_apple: DocumentChunk):
@@ -390,3 +425,43 @@ def test_mcp_scaffold_lifecycle(sample_chunk_apple: DocumentChunk):
     )
     assert prompt_get is not None
     assert "Apple Inc." in prompt_get["result"]["messages"][0]["content"]["text"]
+
+
+def test_agent_workflow_scaffold_lifecycle(sample_chunk_apple: DocumentChunk):
+    """Verify multi-agent swarm orchestration, role delegation, and workflow synthesis."""
+    q = RAGQuery(
+        query_id="q-agent-1",
+        query_text="What was Apple's total net sales in 2024?",
+        ticker="AAPL",
+    )
+    citation = Citation(chunk_id=sample_chunk_apple.chunk_id, quote="$391.0 billion")
+    resp = RAGResponse(
+        query_id="q-agent-1",
+        generated_answer="Apple reported net sales of $391.0 billion for fiscal year 2024.",
+        retrieved_chunks=[sample_chunk_apple],
+        citations=[citation],
+    )
+
+    orchestrator = create_default_orchestrator()
+    assert orchestrator.registry.count() == 5
+
+    # Test Plan generation
+    plan = orchestrator.create_plan(q, resp)
+    assert plan.query_id == "q-agent-1"
+    assert len(plan.steps) == 4
+    step_roles = [s.agent_role for s in plan.steps]
+    assert AgentRole.AUDITOR in step_roles
+    assert AgentRole.EVALUATOR in step_roles
+    assert AgentRole.RISK_ANALYST in step_roles
+    assert AgentRole.SYNTHESIZER in step_roles
+
+    # Execute workflow
+    result = orchestrator.execute_workflow(q, resp, plan=plan)
+    assert result.status == WorkflowStatus.COMPLETED
+    assert result.metrics is not None
+    assert result.metrics.faithfulness_score >= 0.80
+    assert result.risk_metrics is not None
+    assert "APPROVED" in result.summary
+    assert len(result.recommendations) > 0
+    assert len(result.step_results) == 4
+    assert result.total_execution_time_ms > 0.0

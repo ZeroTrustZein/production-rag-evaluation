@@ -824,3 +824,165 @@ class TestCLIMCPCommands:
             )
             assert res_http.exit_code == 0
             assert "Network transport 'http' initialized" in res_http.output
+
+
+class TestCLISwarmCommands:
+    """Validate multi-agent swarm CLI workflows, topological planning, and execution."""
+
+    def test_swarm_list_agents(self, cli_runner: CliRunner) -> None:
+        # Table output
+        res = cli_runner.invoke(cli, ["swarm", "list-agents"])
+        assert res.exit_code == 0
+        assert "Registered Swarm Agents" in res.output
+        assert "planner-agent" in res.output
+        assert "evaluator-agent" in res.output
+        assert "auditor-agent" in res.output
+        assert "risk-analyst-agent" in res.output
+        assert "synthesizer-agent" in res.output
+
+        # Alias 'agent'
+        res_alias = cli_runner.invoke(cli, ["agent", "list-agents"])
+        assert res_alias.exit_code == 0
+        assert "Registered Swarm Agents" in res_alias.output
+
+        # JSON output
+        res_json = cli_runner.invoke(cli, ["swarm", "list-agents", "--json-out"])
+        assert res_json.exit_code == 0
+        data = json.loads(res_json.output)
+        assert isinstance(data, list)
+        roles = [a["role"] for a in data]
+        assert "planner" in roles
+        assert "auditor" in roles
+        assert "evaluator" in roles
+
+    def test_swarm_plan(self, cli_runner: CliRunner, sample_chunk_apple: DocumentChunk) -> None:
+        # Rich table output
+        res = cli_runner.invoke(
+            cli,
+            [
+                "swarm",
+                "plan",
+                "-q",
+                "What was Apple's total revenue?",
+                "-a",
+                "Apple reported net sales of $391.0 billion.",
+                "-c",
+                sample_chunk_apple.text,
+                "-t",
+                "AAPL",
+                "-m",
+                "thorough",
+            ],
+        )
+        assert res.exit_code == 0
+        assert "Swarm Workflow DAG Plan" in res.output
+        assert "Topological Execution Steps" in res.output
+        assert "hallucination_audit" in res.output
+        assert "rag_evaluation" in res.output
+
+        # JSON output
+        res_json = cli_runner.invoke(
+            cli,
+            [
+                "agent",
+                "plan",
+                "-q",
+                "What was Apple's total revenue?",
+                "-a",
+                "Apple reported net sales of $391.0 billion.",
+                "-c",
+                sample_chunk_apple.text,
+                "--json-out",
+            ],
+        )
+        assert res_json.exit_code == 0
+        plan_dict = json.loads(res_json.output)
+        assert "plan_id" in plan_dict
+        assert "steps" in plan_dict
+        assert len(plan_dict["steps"]) >= 3
+
+    def test_swarm_run_success(
+        self, cli_runner: CliRunner, sample_chunk_apple: DocumentChunk, tmp_path: Path
+    ) -> None:
+        out_file = tmp_path / "swarm_result.json"
+        returns_str = "0.01, -0.02, 0.015, -0.005, 0.02"
+
+        # Execute with returns and write to file
+        res = cli_runner.invoke(
+            cli,
+            [
+                "swarm",
+                "run",
+                "-q",
+                "What was Apple's total revenue?",
+                "-a",
+                "Apple reported net sales of $391.0 billion.",
+                "-c",
+                sample_chunk_apple.text,
+                "-t",
+                "AAPL",
+                "-r",
+                returns_str,
+                "-o",
+                str(out_file),
+            ],
+        )
+        assert res.exit_code == 0
+        assert "Swarm Evaluation Workflow" in res.output
+        assert "completed" in res.output
+        assert "Workflow Step Execution Summary" in res.output
+        assert "Evaluator Agent Metrics" in res.output
+        assert "Risk Analyst Agent Metrics" in res.output
+        assert "Synthesis Summary:" in res.output
+        assert out_file.exists()
+
+        saved_data = json.loads(out_file.read_text(encoding="utf-8"))
+        assert saved_data["status"] == "completed"
+        assert saved_data["metrics"] is not None
+
+        # JSON output
+        res_json = cli_runner.invoke(
+            cli,
+            [
+                "agent",
+                "run",
+                "-q",
+                "What was Apple's total revenue?",
+                "-a",
+                "Apple reported net sales of $391.0 billion.",
+                "-c",
+                sample_chunk_apple.text,
+                "--json-out",
+            ],
+        )
+        assert res_json.exit_code == 0
+        json_data = json.loads(res_json.output)
+        assert json_data["status"] == "completed"
+        assert "workflow_id" in json_data
+
+    def test_swarm_run_with_findings_and_flags(
+        self, cli_runner: CliRunner, sample_chunk_apple: DocumentChunk
+    ) -> None:
+        # Hallucinated response to produce findings table
+        hallucinated_answer = (
+            "Apple reported astronomical net sales exceeding 999.0 billion dollars with zero costs."
+        )
+        res = cli_runner.invoke(
+            cli,
+            [
+                "swarm",
+                "run",
+                "-q",
+                "What was Apple's total revenue?",
+                "-a",
+                hallucinated_answer,
+                "-c",
+                sample_chunk_apple.text,
+                "--halt-on-hallucination",
+                "--auto-retry",
+                "--concurrency",
+                "2",
+            ],
+        )
+        assert res.exit_code == 0
+        assert "Swarm Evaluation Workflow" in res.output

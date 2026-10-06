@@ -209,6 +209,9 @@ class SemanticCache:
     def size(self) -> int:
         return len(self._cache)
 
+    def __len__(self) -> int:
+        return self.size
+
     @property
     def hit_count(self) -> int:
         return self._hit_count

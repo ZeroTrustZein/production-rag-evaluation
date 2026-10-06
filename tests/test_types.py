@@ -5,6 +5,38 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from production_rag_evaluation.agents.base import (
+    AgentRegistry,
+    BaseAgent,
+    get_default_agent_registry,
+)
+from production_rag_evaluation.agents.handlers import (
+    AgentMessageBroker,
+    AgentWorkflowIntegrationHandler,
+    WorkflowEventDispatcher,
+)
+from production_rag_evaluation.agents.models import (
+    AgentMessage,
+    AgentRole,
+    AgentStatus,
+    AgentWorkflowConfig,
+    StepExecutionMode,
+    WorkflowExecutionResult,
+    WorkflowPlan,
+    WorkflowStatus,
+    WorkflowStep,
+)
+from production_rag_evaluation.agents.orchestrator import (
+    AgentSwarmOrchestrator,
+    create_default_orchestrator,
+)
+from production_rag_evaluation.agents.specialized import (
+    AuditorAgent,
+    EvaluatorAgent,
+    PlannerAgent,
+    RiskAnalystAgent,
+    SynthesizerAgent,
+)
 from production_rag_evaluation.core.cache import SemanticCache
 from production_rag_evaluation.core.evaluator import RAGEvaluator
 from production_rag_evaluation.core.hallucination import HallucinationDetector
@@ -52,6 +84,11 @@ from production_rag_evaluation.mcp.tools import (
     get_default_tool_registry,
 )
 from production_rag_evaluation.models.interfaces import (
+    AgentMessageBrokerProtocol,
+    AgentProtocol,
+    AgentRegistryProtocol,
+    AgentWorkflowIntegrationHandlerProtocol,
+    AgentWorkflowOrchestratorProtocol,
     EvaluatorProtocol,
     FeatureStoreProtocol,
     FinancialRiskEngineProtocol,
@@ -64,6 +101,7 @@ from production_rag_evaluation.models.interfaces import (
     RiskTelemetryCollectorProtocol,
     SemanticCacheProtocol,
     StreamingPipelineProtocol,
+    WorkflowEventDispatcherProtocol,
 )
 from production_rag_evaluation.models.schemas import (
     AlertSeverity,
@@ -148,6 +186,37 @@ class TestEnumTypes:
         assert ReturnFrequency.DAILY == "DAILY"
         assert AlertSeverity.WARNING == "WARNING"
         assert SystemHealthStatus.HEALTHY == "HEALTHY"
+
+    def test_agent_enums(self) -> None:
+        expected_roles = {
+            "planner",
+            "evaluator",
+            "auditor",
+            "risk_analyst",
+            "synthesizer",
+            "coordinator",
+        }
+        assert {r.value for r in AgentRole} == expected_roles
+        assert AgentRole.PLANNER == "planner"
+
+        expected_statuses = {"idle", "busy", "completed", "failed", "waiting"}
+        assert {s.value for s in AgentStatus} == expected_statuses
+        assert AgentStatus.IDLE == "idle"
+
+        expected_wf_statuses = {
+            "pending",
+            "running",
+            "completed",
+            "failed",
+            "skipped",
+            "cancelled",
+        }
+        assert {s.value for s in WorkflowStatus} == expected_wf_statuses
+        assert WorkflowStatus.PENDING == "pending"
+
+        expected_modes = {"sequential", "parallel", "conditional"}
+        assert {m.value for m in StepExecutionMode} == expected_modes
+        assert StepExecutionMode.SEQUENTIAL == "sequential"
 
 
 class TestDomainModels:
@@ -490,6 +559,52 @@ class TestProtocolConformity:
         integ = MCPIntegrationHandler()
         assert isinstance(integ, MCPIntegrationHandlerProtocol)
 
+    def test_agent_protocols_conformity(self) -> None:
+        for agent_cls in [
+            PlannerAgent,
+            EvaluatorAgent,
+            AuditorAgent,
+            RiskAnalystAgent,
+            SynthesizerAgent,
+        ]:
+            assert issubclass(agent_cls, BaseAgent)
+
+        planner = PlannerAgent()
+        assert isinstance(planner, AgentProtocol)
+
+        evaluator = EvaluatorAgent()
+        assert isinstance(evaluator, AgentProtocol)
+
+        auditor = AuditorAgent()
+        assert isinstance(auditor, AgentProtocol)
+
+        risk_analyst = RiskAnalystAgent()
+        assert isinstance(risk_analyst, AgentProtocol)
+
+        synthesizer = SynthesizerAgent()
+        assert isinstance(synthesizer, AgentProtocol)
+
+        registry = AgentRegistry()
+        assert isinstance(registry, AgentRegistryProtocol)
+
+        default_registry = get_default_agent_registry()
+        assert isinstance(default_registry, AgentRegistryProtocol)
+
+        orchestrator = AgentSwarmOrchestrator()
+        assert isinstance(orchestrator, AgentWorkflowOrchestratorProtocol)
+
+        default_orchestrator = create_default_orchestrator()
+        assert isinstance(default_orchestrator, AgentWorkflowOrchestratorProtocol)
+
+        dispatcher = WorkflowEventDispatcher()
+        assert isinstance(dispatcher, WorkflowEventDispatcherProtocol)
+
+        broker = AgentMessageBroker()
+        assert isinstance(broker, AgentMessageBrokerProtocol)
+
+        handler = AgentWorkflowIntegrationHandler()
+        assert isinstance(handler, AgentWorkflowIntegrationHandlerProtocol)
+
 
 class TestFeatureStoreModels:
     """Validate Feature Definition, Schema, Statistics, and Streaming Batch models."""
@@ -669,3 +784,133 @@ class TestMCPModels:
         assert stats.tool_name == "rag_evaluate"
         assert stats.call_count == 10
         assert stats.mean_latency_ms == 15.0
+
+
+class TestAgentModels:
+    """Validate multi-agent swarm schemas, workflow plans, and execution models."""
+
+    def test_agent_message_model(self) -> None:
+        msg = AgentMessage(
+            sender="planner-01",
+            receiver="evaluator-01",
+            role=AgentRole.PLANNER,
+            content="Execute RAG evaluation",
+            payload={"query_id": "q-100"},
+        )
+        assert msg.sender == "planner-01"
+        assert msg.receiver == "evaluator-01"
+        assert msg.role == AgentRole.PLANNER
+        assert msg.content == "Execute RAG evaluation"
+        assert msg.payload == {"query_id": "q-100"}
+        assert msg.message_id is not None
+        assert msg.timestamp is not None
+
+        # Frozen immutability
+        with pytest.raises(ValidationError):
+            setattr(msg, "content", "Updated content")
+
+    def test_workflow_step_model(self) -> None:
+        step = WorkflowStep(
+            name="evaluate_grounding",
+            agent_role=AgentRole.EVALUATOR,
+            mode=StepExecutionMode.PARALLEL,
+            dependencies=["step-001"],
+            inputs={"threshold": 0.8},
+        )
+        assert step.name == "evaluate_grounding"
+        assert step.agent_role == AgentRole.EVALUATOR
+        assert step.mode == StepExecutionMode.PARALLEL
+        assert step.dependencies == ["step-001"]
+        assert step.status == WorkflowStatus.PENDING
+        assert step.inputs["threshold"] == 0.8
+        assert step.outputs == {}
+        assert step.execution_time_ms == 0.0
+        assert step.error is None
+        assert step.step_id is not None
+
+        # Mutable update
+        step.status = WorkflowStatus.COMPLETED
+        step.outputs = {"score": 0.95}
+        step.execution_time_ms = 45.2
+        assert step.status == WorkflowStatus.COMPLETED
+        assert step.outputs["score"] == 0.95
+
+    def test_workflow_plan_model(self) -> None:
+        s1 = WorkflowStep(name="plan", agent_role=AgentRole.PLANNER)
+        s2 = WorkflowStep(name="eval", agent_role=AgentRole.EVALUATOR)
+        plan = WorkflowPlan(
+            query_id="q-200",
+            ticker="AAPL",
+            steps=[s1, s2],
+            estimated_duration_ms=120.0,
+        )
+        assert plan.query_id == "q-200"
+        assert plan.ticker == "AAPL"
+        assert len(plan.steps) == 2
+        assert plan.plan_id is not None
+        assert plan.created_at is not None
+        assert plan.estimated_duration_ms == 120.0
+
+        assert plan.get_step(s1.step_id) == s1
+        assert plan.get_step("non-existent-id") is None
+
+        planner_steps = plan.get_steps_for_role(AgentRole.PLANNER)
+        assert planner_steps == [s1]
+        auditor_steps = plan.get_steps_for_role(AgentRole.AUDITOR)
+        assert auditor_steps == []
+
+    def test_workflow_execution_result_model(self) -> None:
+        plan = WorkflowPlan(query_id="q-300", steps=[])
+        metrics = EvaluationMetrics(
+            faithfulness_score=0.9,
+            answer_relevance_score=0.85,
+            context_recall_score=0.88,
+            context_precision_score=0.92,
+            citation_grounding_score=0.91,
+            hallucination_rate=0.05,
+            overall_pass=True,
+        )
+        result = WorkflowExecutionResult(
+            plan=plan,
+            status=WorkflowStatus.COMPLETED,
+            metrics=metrics,
+            summary="All evaluation steps passed successfully.",
+            recommendations=["Monitor latency."],
+            total_execution_time_ms=185.5,
+        )
+        assert result.workflow_id is not None
+        assert result.status == WorkflowStatus.COMPLETED
+        assert result.plan == plan
+        assert result.metrics == metrics
+        assert result.summary == "All evaluation steps passed successfully."
+        assert len(result.recommendations) == 1
+        assert result.total_execution_time_ms == 185.5
+        assert result.error is None
+
+    def test_agent_workflow_config_model(self) -> None:
+        cfg = AgentWorkflowConfig()
+        assert cfg.max_iterations == 10
+        assert cfg.timeout_seconds == 60.0
+        assert cfg.concurrency_limit == 5
+        assert cfg.halt_on_high_severity_hallucination is False
+        assert cfg.auto_retry_failed_steps is False
+
+        # Frozen immutability
+        with pytest.raises(ValidationError):
+            setattr(cfg, "max_iterations", 20)
+
+        # Validation constraints
+        with pytest.raises(ValidationError):
+            AgentWorkflowConfig(max_iterations=0)  # ge=1
+
+        with pytest.raises(ValidationError):
+            AgentWorkflowConfig(max_iterations=51)  # le=50
+
+        with pytest.raises(ValidationError):
+            AgentWorkflowConfig(timeout_seconds=0.0)  # gt=0.0
+
+        with pytest.raises(ValidationError):
+            AgentWorkflowConfig(concurrency_limit=0)  # ge=1
+
+        with pytest.raises(ValidationError):
+            AgentWorkflowConfig(concurrency_limit=21)  # le=20

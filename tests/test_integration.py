@@ -445,3 +445,306 @@ class TestMCPFullIntegrationPipeline:
         )
         assert prompt_rendered is not None
         assert "AMZN" in prompt_rendered["result"]["messages"][0]["content"]["text"]
+
+
+class TestAgentSwarmIntegrationWorkflow:
+    """Full end-to-end integration tests for multi-agent swarm orchestration and handlers."""
+
+    def test_swarm_end_to_end_lifecycle_with_event_dispatcher_and_messaging(
+        self, sample_chunk_apple, sample_returns
+    ) -> None:
+        from production_rag_evaluation.agents.handlers import (
+            AgentMessageBroker,
+            WorkflowEventDispatcher,
+        )
+        from production_rag_evaluation.agents.models import (
+            AgentMessage,
+            AgentRole,
+            WorkflowStatus,
+        )
+        from production_rag_evaluation.agents.orchestrator import create_default_orchestrator
+        from production_rag_evaluation.models.schemas import (
+            EvaluationMode,
+            RAGQuery,
+            RAGResponse,
+        )
+
+        dispatcher = WorkflowEventDispatcher()
+        broker = AgentMessageBroker()
+        events_captured: List[str] = []
+
+        dispatcher.subscribe("workflow_started", lambda ev, payload: events_captured.append(ev))
+        dispatcher.subscribe("step_started", lambda ev, payload: events_captured.append(ev))
+        dispatcher.subscribe("step_completed", lambda ev, payload: events_captured.append(ev))
+        dispatcher.subscribe("workflow_completed", lambda ev, payload: events_captured.append(ev))
+
+        orchestrator = create_default_orchestrator(
+            event_dispatcher=dispatcher,
+            message_broker=broker,
+        )
+        from production_rag_evaluation.agents.handlers import AgentWorkflowIntegrationHandler
+
+        handler = AgentWorkflowIntegrationHandler(
+            orchestrator=orchestrator,
+            event_dispatcher=dispatcher,
+            message_broker=broker,
+        )
+
+        # Route broker message before execution
+        broker.route_message(
+            AgentMessage(
+                sender="coordinator",
+                receiver="planner-agent",
+                role=AgentRole.PLANNER,
+                content="Use high-priority evaluation",
+                payload={"priority": "high"},
+            ),
+            orchestrator.registry,
+        )
+        assert broker.total_messages == 1
+        assert len(broker.get_history(role=AgentRole.PLANNER)) == 1
+        query = RAGQuery(
+            query_id="q-integ-swarm-1",
+            ticker="AAPL",
+            query_text="What were Apple's net sales in fiscal year 2024?",
+        )
+        response = RAGResponse(
+            query_id="q-integ-swarm-1",
+            generated_answer="Apple reported net sales of $391.0 billion in fiscal year 2024.",
+            retrieved_chunks=[sample_chunk_apple],
+        )
+
+        plan = orchestrator.create_plan(
+            query=query,
+            response=response,
+            returns=sample_returns,
+            evaluation_mode=EvaluationMode.THOROUGH,
+        )
+        assert len(plan.steps) >= 3
+
+        result = handler.execute_and_record(
+            plan=plan,
+            query=query,
+            response=response,
+            returns=sample_returns,
+        )
+
+        assert result.status == WorkflowStatus.COMPLETED
+        assert result.metrics is not None
+        assert result.metrics.faithfulness_score >= 0.85
+        assert result.metrics.overall_pass is True
+        assert result.risk_metrics is not None
+        assert result.risk_metrics.sharpe_ratio is not None
+        assert len(result.summary) > 0
+        assert len(result.recommendations) > 0
+        assert "workflow_started" in events_captured
+        assert "workflow_completed" in events_captured
+
+    def test_swarm_integration_with_feature_store_and_telemetry(
+        self, tmp_path, sample_chunk_apple
+    ) -> None:
+        from production_rag_evaluation.agents.handlers import AgentWorkflowIntegrationHandler
+        from production_rag_evaluation.agents.models import WorkflowStatus
+        from production_rag_evaluation.features.models import FeatureGroup
+        from production_rag_evaluation.features.store import ParquetFeatureStore
+        from production_rag_evaluation.finance.telemetry import RiskTelemetryCollector
+        from production_rag_evaluation.models.schemas import (
+            AlertSeverity,
+            EvaluationMode,
+            RAGQuery,
+            RAGResponse,
+        )
+
+        store = ParquetFeatureStore(base_path=tmp_path / "swarm_fs")
+        collector = RiskTelemetryCollector()
+        captured_alerts = []
+        collector.add_alert_listener(captured_alerts.append)
+        handler = AgentWorkflowIntegrationHandler(
+            feature_store=store,
+            telemetry_collector=collector,
+        )
+
+        # Distorted answer to trigger hallucination and high negative returns for drawdown alert
+        bad_returns = np.array([0.01, -0.12, -0.10, -0.08, 0.02, -0.09, -0.05])
+        q = RAGQuery(
+            query_id="q-integ-distort",
+            ticker="AAPL",
+            query_text="What was Apple's total net sales in 2024?",
+        )
+        resp = RAGResponse(
+            query_id="q-integ-distort",
+            generated_answer="Apple reported net sales of $890.0 billion and gross margin of 12.0%.",
+            retrieved_chunks=[sample_chunk_apple],
+        )
+
+        plan = handler.orchestrator.create_plan(
+            query=q,
+            response=resp,
+            returns=bad_returns,
+            evaluation_mode=EvaluationMode.THOROUGH,
+        )
+        result = handler.execute_and_record(
+            query=q,
+            response=resp,
+            returns=bad_returns,
+            plan=plan,
+        )
+
+        assert result.status == WorkflowStatus.COMPLETED
+        assert len(result.findings) >= 1
+
+        # Check workflow feature was persisted through integration handler
+        eval_records = store.read_records(group=FeatureGroup.EVALUATION)
+        assert len(eval_records) == 1
+        assert eval_records[0].features["finding_count"] >= 1
+        assert eval_records[0].features["composite_health_score"] >= 0.0
+
+        # Check telemetry collector summary and alerts
+        telem_summary = collector.export_summary()
+        assert telem_summary["total_evaluations"] >= 1
+        assert len(captured_alerts) >= 1
+        assert any(
+            a.severity in (AlertSeverity.CRITICAL, AlertSeverity.WARNING) for a in captured_alerts
+        )
+
+    def test_swarm_semantic_cache_integration(self, sample_chunk_apple) -> None:
+        from production_rag_evaluation.agents.handlers import AgentWorkflowIntegrationHandler
+        from production_rag_evaluation.core.cache import SemanticCache
+        from production_rag_evaluation.models.schemas import RAGQuery, RAGResponse
+
+        cache = SemanticCache(similarity_threshold=0.88)
+        handler = AgentWorkflowIntegrationHandler(semantic_cache=cache)
+
+        q = RAGQuery(
+            query_id="q-cache-hit-1",
+            ticker="AAPL",
+            query_text="What was Apple's total net sales in fiscal year 2024?",
+        )
+        resp = RAGResponse(
+            query_id="q-cache-hit-1",
+            generated_answer="Apple reported net sales of $391.0 billion in fiscal year 2024.",
+            retrieved_chunks=[sample_chunk_apple],
+        )
+
+        # 1. Cold execution fills cache
+        res1 = handler.execute_and_record(q, resp, use_cache=True)
+        assert res1.status.value == "completed"
+        assert len(cache) == 1
+
+        # 2. Warm execution hits cache
+        cache_hits: List[dict] = []
+        handler.event_dispatcher.subscribe("workflow_cache_hit", lambda e, p: cache_hits.append(p))
+
+        res2 = handler.execute_and_record(q, resp, use_cache=True)
+        assert res2.status.value == "completed"
+        assert len(cache_hits) == 1
+        assert cache_hits[0]["query_id"] == "q-cache-hit-1"
+
+        # 3. Different query executes and creates another cache entry
+        q_rephrased = RAGQuery(
+            query_id="q-cache-hit-2",
+            ticker="AAPL",
+            query_text="Summarize Apple's services revenue growth and gross margin trend.",
+        )
+        res3 = handler.execute_and_record(q_rephrased, resp, use_cache=True)
+        assert res3.status.value == "completed"
+        assert len(cache_hits) == 1
+        assert len(cache) == 2
+
+        # 4. Explicit bypass
+        res4 = handler.execute_and_record(q, resp, use_cache=False)
+        assert res4.status.value == "completed"
+        assert len(cache_hits) == 1  # No new cache hit
+
+    def test_swarm_mcp_rag_swarm_evaluate_tool_integration(
+        self, sample_chunk_apple, sample_returns
+    ) -> None:
+        import json
+
+        from production_rag_evaluation.mcp.server import create_mcp_server
+
+        server = create_mcp_server()
+
+        # Check tool registration
+        tools_res = server.handle_request(
+            {"jsonrpc": "2.0", "id": "tools-swarm-1", "method": "tools/list", "params": {}}
+        )
+        assert tools_res is not None
+        tool_names = [t["name"] for t in tools_res["result"]["tools"]]
+        assert "rag_swarm_evaluate" in tool_names
+
+        # Execute tool via JSON-RPC
+        call_res = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": "tools-swarm-2",
+                "method": "tools/call",
+                "params": {
+                    "name": "rag_swarm_evaluate",
+                    "arguments": {
+                        "query_text": "Apple fiscal 2024 net sales?",
+                        "generated_answer": "Apple reported net sales of $391.0 billion.",
+                        "context_chunks": [sample_chunk_apple.text],
+                        "ticker": "AAPL",
+                        "returns": sample_returns.tolist()[:30],
+                        "mode": "FAST",
+                    },
+                },
+            }
+        )
+        assert call_res is not None
+        assert "result" in call_res
+        assert call_res["result"]["isError"] is False
+        content_text = call_res["result"]["content"][0]["text"]
+        payload = json.loads(content_text)
+        assert "workflow_id" in payload
+        assert "status" in payload
+        assert payload["status"] == "completed"
+        assert payload["composite_health_score"] >= 0.0
+        assert "summary" in payload
+        assert "recommendations" in payload
+
+    def test_swarm_batch_workflow_execution(self, sample_chunk_apple) -> None:
+        from production_rag_evaluation.agents.handlers import AgentWorkflowIntegrationHandler
+        from production_rag_evaluation.models.schemas import (
+            EvaluationMode,
+            RAGQuery,
+            RAGResponse,
+        )
+
+        handler = AgentWorkflowIntegrationHandler()
+        pairs = [
+            (
+                RAGQuery(query_id="batch-1", ticker="AAPL", query_text="Apple sales?"),
+                RAGResponse(
+                    query_id="batch-1",
+                    generated_answer="Apple reported net sales of $391.0 billion.",
+                    retrieved_chunks=[sample_chunk_apple],
+                ),
+            ),
+            (
+                RAGQuery(query_id="batch-2", ticker="MSFT", query_text="Cloud growth?"),
+                RAGResponse(
+                    query_id="batch-2",
+                    generated_answer="Microsoft Cloud revenue increased by 22% in FY2024.",
+                    retrieved_chunks=[sample_chunk_apple],
+                ),
+            ),
+            (
+                RAGQuery(query_id="batch-3", ticker="NVDA", query_text="GPU revenue?"),
+                RAGResponse(
+                    query_id="batch-3",
+                    generated_answer="Data center revenue drove gross margin expansion.",
+                    retrieved_chunks=[sample_chunk_apple],
+                ),
+            ),
+        ]
+
+        results = handler.handle_batch_workflow(pairs, evaluation_mode=EvaluationMode.FAST)
+        assert len(results) == 3
+        assert all(r.status.value == "completed" for r in results)
+
+        stats = handler.get_execution_stats()
+        assert stats["total_executions"] == 3
+        assert stats["total_errors"] == 0
+        assert stats["average_latency_ms"] > 0

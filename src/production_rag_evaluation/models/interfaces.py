@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 import numpy as np
 
@@ -451,4 +451,111 @@ class MCPSessionHandlerProtocol(Protocol):
 
     def close_session(self, session_id: str) -> bool:
         """Terminate an active session."""
+        ...
+
+
+@runtime_checkable
+class AgentProtocol(Protocol):
+    """Contract for swarm agents."""
+
+    @property
+    def name(self) -> str:
+        """Agent identifier."""
+        ...
+
+    def execute(self, step: Any, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute assigned workflow step."""
+        ...
+
+
+@runtime_checkable
+class AgentRegistryProtocol(Protocol):
+    """Contract for agent directory and resolution registry."""
+
+    def register(self, agent: Any) -> None:
+        """Register an agent."""
+        ...
+
+    def get(self, name: str) -> Optional[Any]:
+        """Fetch agent by name."""
+        ...
+
+    def list_agents(self) -> List[Dict[str, Any]]:
+        """List registered agents."""
+        ...
+
+
+@runtime_checkable
+class AgentWorkflowOrchestratorProtocol(Protocol):
+    """Contract for multi-agent evaluation workflow orchestrator."""
+
+    def create_plan(
+        self,
+        query: RAGQuery,
+        response: RAGResponse,
+        returns: Optional[np.ndarray] = None,
+        evaluation_mode: Any = ...,
+    ) -> Any:
+        """Construct multi-agent workflow plan."""
+        ...
+
+    def execute_workflow(
+        self,
+        query: RAGQuery,
+        response: RAGResponse,
+        returns: Optional[np.ndarray] = None,
+        plan: Optional[Any] = None,
+    ) -> Any:
+        """Execute multi-agent workflow to completion."""
+        ...
+
+
+@runtime_checkable
+class WorkflowEventDispatcherProtocol(Protocol):
+    """Contract for workflow lifecycle event dispatching and subscription."""
+
+    def subscribe(self, event: str, callback: Callable[[str, Dict[str, Any]], None]) -> None:
+        """Register an event listener callback."""
+        ...
+
+    def publish(self, event: str, payload: Dict[str, Any]) -> int:
+        """Publish event and invoke matching subscribers."""
+        ...
+
+
+@runtime_checkable
+class AgentMessageBrokerProtocol(Protocol):
+    """Contract for inter-agent message routing and history tracking."""
+
+    def route_message(self, message: Any, registry: Any) -> bool:
+        """Route message to recipient inbox or broadcast across swarm."""
+        ...
+
+    def get_history(
+        self,
+        sender: Optional[str] = None,
+        receiver: Optional[str] = None,
+        role: Optional[Any] = None,
+    ) -> List[Any]:
+        """Fetch filtered message exchange history."""
+        ...
+
+
+@runtime_checkable
+class AgentWorkflowIntegrationHandlerProtocol(Protocol):
+    """Contract for multi-agent workflow integration and telemetry recording."""
+
+    def execute_and_record(
+        self,
+        query: RAGQuery,
+        response: RAGResponse,
+        returns: Optional[np.ndarray] = None,
+        plan: Optional[Any] = None,
+        use_cache: bool = True,
+    ) -> Any:
+        """Execute workflow and record features, telemetry, and metrics."""
+        ...
+
+    def get_execution_stats(self) -> Dict[str, Any]:
+        """Return execution metrics across invocations."""
         ...
