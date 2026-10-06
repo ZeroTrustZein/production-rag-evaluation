@@ -1524,7 +1524,7 @@ def swarm_plan_cmd(
 
     table = Table(title="Topological Execution Steps")
     table.add_column("Step ID", style="dim", no_wrap=True)
-    table.add_column("Step Name", style="cyan")
+    table.add_column("Step Name", style="cyan", no_wrap=True)
     table.add_column("Agent Role", style="magenta")
     table.add_column("Mode", style="yellow")
     table.add_column("Dependencies", style="green")

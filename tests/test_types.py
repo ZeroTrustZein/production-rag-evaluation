@@ -596,6 +596,15 @@ class TestProtocolConformity:
         default_orchestrator = create_default_orchestrator()
         assert isinstance(default_orchestrator, AgentWorkflowOrchestratorProtocol)
 
+        dispatcher = WorkflowEventDispatcher()
+        assert isinstance(dispatcher, WorkflowEventDispatcherProtocol)
+
+        broker = AgentMessageBroker()
+        assert isinstance(broker, AgentMessageBrokerProtocol)
+
+        handler = AgentWorkflowIntegrationHandler()
+        assert isinstance(handler, AgentWorkflowIntegrationHandlerProtocol)
+
 
 class TestFeatureStoreModels:
     """Validate Feature Definition, Schema, Statistics, and Streaming Batch models."""

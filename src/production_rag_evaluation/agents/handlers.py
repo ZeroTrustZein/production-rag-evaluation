@@ -29,6 +29,7 @@ from production_rag_evaluation.models.schemas import (
     EvaluationMode,
     RAGQuery,
     RAGResponse,
+    Severity,
     TelemetryAlert,
 )
 
@@ -161,40 +162,62 @@ class WorkflowTelemetryBridge:
 
         if result.status == WorkflowStatus.FAILED:
             alert = TelemetryAlert(
+                alert_id=f"alert-fail-{result.workflow_id[:8]}",
                 metric_name="agent_workflow_failure",
-                current_value=1.0,
+                observed_value=1.0,
                 threshold=0.0,
                 severity=AlertSeverity.CRITICAL,
                 message=f"Agent workflow {result.workflow_id} failed: {result.error}",
             )
-            self.collector.record_alert(alert)
+            for listener in self.collector._alert_listeners:
+                try:
+                    listener(alert)
+                except Exception:
+                    pass
             alerts.append(alert)
 
         # Check critical hallucination findings
         if result.findings:
-            critical_findings = [f for f in result.findings if f.severity.value in ("high", "critical")]
+            critical_findings = [
+                f for f in result.findings
+                if f.severity in (Severity.HIGH, Severity.CRITICAL)
+                or str(f.severity.value).upper() in ("HIGH", "CRITICAL")
+            ]
             if critical_findings:
                 alert = TelemetryAlert(
+                    alert_id=f"alert-hal-{result.workflow_id[:8]}",
                     metric_name="agent_hallucination_critical",
-                    current_value=float(len(critical_findings)),
+                    observed_value=float(len(critical_findings)),
                     threshold=0.0,
-                    severity=AlertSeverity.HIGH,
+                    severity=AlertSeverity.CRITICAL,
                     message=f"Workflow {result.workflow_id} detected {len(critical_findings)} high/critical hallucinations.",
                 )
-                self.collector.record_alert(alert)
+                for listener in self.collector._alert_listeners:
+                    try:
+                        listener(alert)
+                    except Exception:
+                        pass
                 alerts.append(alert)
 
         # Check risk metrics drawdown
         if result.risk_metrics and result.risk_metrics.max_drawdown > 0.20:
             alert = TelemetryAlert(
+                alert_id=f"alert-dd-{result.workflow_id[:8]}",
                 metric_name="agent_risk_max_drawdown",
-                current_value=float(result.risk_metrics.max_drawdown),
+                observed_value=float(result.risk_metrics.max_drawdown),
                 threshold=0.20,
-                severity=AlertSeverity.MEDIUM,
+                severity=AlertSeverity.WARNING,
                 message=f"Workflow {result.workflow_id} calculated high Max Drawdown: {result.risk_metrics.max_drawdown:.2%}",
             )
-            self.collector.record_alert(alert)
+            for listener in self.collector._alert_listeners:
+                try:
+                    listener(alert)
+                except Exception:
+                    pass
             alerts.append(alert)
+
+        if result.metrics:
+            self.collector.record_evaluation(result.metrics)
 
         return alerts
 
@@ -321,7 +344,7 @@ class AgentWorkflowIntegrationHandler:
             "total_executions": self._execution_count,
             "total_errors": self._error_count,
             "average_latency_ms": round(avg_lat, 2),
-            "cached_items": len(self.semantic_cache) if self.semantic_cache else 0,
+            "cached_items": self.semantic_cache.size if self.semantic_cache else 0,
             "message_broker_messages": self.message_broker.total_messages,
         }
 

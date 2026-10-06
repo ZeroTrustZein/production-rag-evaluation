@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
@@ -521,8 +522,8 @@ def handle_rag_swarm_evaluate(
                 DocumentChunk(
                     chunk_id=c_id,
                     ticker=active_ticker,
-                    document_type=DocumentType.FILING_10K,
-                    content=c_text,
+                    doc_type=DocumentType.SEC_10K,
+                    text=c_text,
                 )
             )
         else:
@@ -530,12 +531,13 @@ def handle_rag_swarm_evaluate(
                 DocumentChunk(
                     chunk_id=f"chunk-{idx + 1}",
                     ticker=active_ticker,
-                    document_type=DocumentType.FILING_10K,
-                    content=str(c),
+                    doc_type=DocumentType.SEC_10K,
+                    text=str(c),
                 )
             )
 
     rag_query = RAGQuery(
+        query_id=f"query-{uuid.uuid4().hex[:8]}",
         ticker=active_ticker,
         query_text=query_text,
     )
