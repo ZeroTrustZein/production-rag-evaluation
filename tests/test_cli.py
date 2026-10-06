@@ -986,4 +986,3 @@ class TestCLISwarmCommands:
         )
         assert res.exit_code == 0
         assert "Swarm Evaluation Workflow" in res.output
-

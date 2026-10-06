@@ -465,4 +465,3 @@ def test_agent_workflow_scaffold_lifecycle(sample_chunk_apple: DocumentChunk):
     assert len(result.recommendations) > 0
     assert len(result.step_results) == 4
     assert result.total_execution_time_ms > 0.0
-

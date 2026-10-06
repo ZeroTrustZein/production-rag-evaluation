@@ -593,9 +593,7 @@ class TestAgentSwarmCoreEngine:
         assert valid is False
         assert "Cycle detected" in (err or "")
 
-    def test_orchestrator_parallel_wave_execution(
-        self, sample_chunk_apple: DocumentChunk
-    ) -> None:
+    def test_orchestrator_parallel_wave_execution(self, sample_chunk_apple: DocumentChunk) -> None:
         from production_rag_evaluation.agents import (
             AgentWorkflowConfig,
             create_default_orchestrator,
@@ -804,9 +802,7 @@ class TestAgentSwarmCoreEngine:
         assert len(eval_agent.inbox) > 0
         assert eval_agent.inbox[-1].content == "route test"
 
-    def test_auditor_and_evaluator_agent_modes(
-        self, sample_chunk_apple: DocumentChunk
-    ) -> None:
+    def test_auditor_and_evaluator_agent_modes(self, sample_chunk_apple: DocumentChunk) -> None:
         from production_rag_evaluation.agents.models import AgentRole, WorkflowStep
         from production_rag_evaluation.agents.specialized import AuditorAgent, EvaluatorAgent
 
@@ -821,7 +817,9 @@ class TestAgentSwarmCoreEngine:
         )
 
         # Test FAST mode on auditor
-        step_fast = WorkflowStep(name="audit_fast", agent_role=AgentRole.AUDITOR, inputs={"mode": "FAST"})
+        step_fast = WorkflowStep(
+            name="audit_fast", agent_role=AgentRole.AUDITOR, inputs={"mode": "FAST"}
+        )
         context = {"query": q, "response": resp, "messages": []}
         res_audit = auditor.execute(step_fast, context)
         assert res_audit["finding_count"] == 0
@@ -829,9 +827,9 @@ class TestAgentSwarmCoreEngine:
         assert len(context["messages"]) == 1
 
         # Test Evaluator execution
-        step_eval = WorkflowStep(name="eval_core", agent_role=AgentRole.EVALUATOR, inputs={"mode": "FAST"})
+        step_eval = WorkflowStep(
+            name="eval_core", agent_role=AgentRole.EVALUATOR, inputs={"mode": "FAST"}
+        )
         res_eval = evaluator.execute(step_eval, context)
         assert res_eval["overall_pass"] is True
         assert len(context["messages"]) == 2
-
-

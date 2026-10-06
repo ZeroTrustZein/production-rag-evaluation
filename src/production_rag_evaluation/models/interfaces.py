@@ -559,5 +559,3 @@ class AgentWorkflowIntegrationHandlerProtocol(Protocol):
     def get_execution_stats(self) -> Dict[str, Any]:
         """Return execution metrics across invocations."""
         ...
-
-

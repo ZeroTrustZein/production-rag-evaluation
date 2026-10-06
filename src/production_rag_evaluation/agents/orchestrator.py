@@ -248,7 +248,9 @@ class AgentSwarmOrchestrator:
                 # Check conditional mode
                 if step.mode == StepExecutionMode.CONDITIONAL:
                     condition_val = step.inputs.get("condition")
-                    if condition_val is False or (callable(condition_val) and not condition_val(context)):
+                    if condition_val is False or (
+                        callable(condition_val) and not condition_val(context)
+                    ):
                         step.status = WorkflowStatus.SKIPPED
                         step.outputs = {"skipped_reason": "Conditional check evaluated to false"}
                         continue
@@ -359,4 +361,3 @@ def create_default_orchestrator(
         event_dispatcher=event_dispatcher,
         message_broker=message_broker,
     )
-

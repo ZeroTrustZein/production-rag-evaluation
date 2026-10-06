@@ -138,7 +138,10 @@ class EvaluatorAgent(BaseAgent):
         msg = self.send_message(
             receiver="synthesizer-agent",
             content=f"Evaluator completed with faithfulness {metrics.faithfulness_score:.2%}",
-            payload={"faithfulness": metrics.faithfulness_score, "overall_pass": metrics.overall_pass},
+            payload={
+                "faithfulness": metrics.faithfulness_score,
+                "overall_pass": metrics.overall_pass,
+            },
         )
         if "messages" in context and isinstance(context["messages"], list):
             context["messages"].append(msg)
@@ -173,7 +176,11 @@ class AuditorAgent(BaseAgent):
         chunks: List[DocumentChunk] = response.retrieved_chunks
         mode_val = step.inputs.get("mode", EvaluationMode.THOROUGH.value)
 
-        if mode_val in (EvaluationMode.THOROUGH.value, EvaluationMode.FINANCIAL_STRICT.value, EvaluationMode.AUDIT.value):
+        if mode_val in (
+            EvaluationMode.THOROUGH.value,
+            EvaluationMode.FINANCIAL_STRICT.value,
+            EvaluationMode.AUDIT.value,
+        ):
             all_findings = self.detector.analyze(response.generated_answer, chunks)
         else:
             num_distortions = self.detector.detect_numerical_distortions(
@@ -197,8 +204,7 @@ class AuditorAgent(BaseAgent):
             severity_counts[f.severity.value] += 1
 
         has_critical = (
-            severity_counts[Severity.CRITICAL.value] > 0
-            or severity_counts[Severity.HIGH.value] > 0
+            severity_counts[Severity.CRITICAL.value] > 0 or severity_counts[Severity.HIGH.value] > 0
         )
 
         msg = self.send_message(
@@ -333,13 +339,21 @@ class SynthesizerAgent(BaseAgent):
         if not overall_pass:
             recommendations.append("Reject response due to sub-threshold faithfulness.")
         if has_critical:
-            recommendations.append("Critical financial distortion detected; manual compliance review required.")
+            recommendations.append(
+                "Critical financial distortion detected; manual compliance review required."
+            )
         if breach_rate > 0.15:
-            recommendations.append(f"High risk breach rate ({breach_rate:.1%}) indicates sensitivity to factual hallucinations.")
+            recommendations.append(
+                f"High risk breach rate ({breach_rate:.1%}) indicates sensitivity to factual hallucinations."
+            )
         if finding_count == 0 and overall_pass:
-            recommendations.append("Response validated with high confidence; cleared for production dispatch.")
+            recommendations.append(
+                "Response validated with high confidence; cleared for production dispatch."
+            )
         if not recommendations:
-            recommendations.append("Response passed with minor warnings; monitor drift in feature store.")
+            recommendations.append(
+                "Response passed with minor warnings; monitor drift in feature store."
+            )
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         self.last_execution_time_ms = elapsed_ms

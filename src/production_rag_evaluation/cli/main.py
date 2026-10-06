@@ -1694,7 +1694,10 @@ def swarm_run_cmd(
         m_table.add_row("Answer Relevance", f"{result.metrics.answer_relevance_score:.2%}")
         m_table.add_row("Context Recall", f"{result.metrics.context_recall_score:.2%}")
         m_table.add_row("Context Precision", f"{result.metrics.context_precision_score:.2%}")
-        m_table.add_row("Overall Pass", "[green]PASS[/green]" if result.metrics.overall_pass else "[red]FAIL[/red]")
+        m_table.add_row(
+            "Overall Pass",
+            "[green]PASS[/green]" if result.metrics.overall_pass else "[red]FAIL[/red]",
+        )
         console.print(m_table)
 
     # Hallucination Findings Breakdown
@@ -1738,4 +1741,3 @@ def swarm_run_cmd(
                 border_style="yellow",
             )
         )
-

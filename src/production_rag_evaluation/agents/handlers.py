@@ -179,7 +179,8 @@ class WorkflowTelemetryBridge:
         # Check critical hallucination findings
         if result.findings:
             critical_findings = [
-                f for f in result.findings
+                f
+                for f in result.findings
                 if f.severity in (Severity.HIGH, Severity.CRITICAL)
                 or str(f.severity.value).upper() in ("HIGH", "CRITICAL")
             ]
@@ -256,18 +257,24 @@ class AgentWorkflowIntegrationHandler:
         """Execute multi-agent workflow, check/store cache, record features, and publish events."""
         t0 = time.perf_counter()
 
-        self.event_dispatcher.publish("workflow_started", {
-            "query_id": query.query_id,
-            "ticker": query.ticker,
-        })
+        self.event_dispatcher.publish(
+            "workflow_started",
+            {
+                "query_id": query.query_id,
+                "ticker": query.ticker,
+            },
+        )
 
         # Cache check
         if use_cache and self.semantic_cache is not None:
             cached_result = self.semantic_cache.get(query.query_text)
             if cached_result is not None:
-                self.event_dispatcher.publish("workflow_cache_hit", {
-                    "query_id": query.query_id,
-                })
+                self.event_dispatcher.publish(
+                    "workflow_cache_hit",
+                    {
+                        "query_id": query.query_id,
+                    },
+                )
 
         # Execute workflow
         result = self.orchestrator.execute_workflow(
@@ -283,16 +290,22 @@ class AgentWorkflowIntegrationHandler:
 
         if result.status == WorkflowStatus.FAILED:
             self._error_count += 1
-            self.event_dispatcher.publish("workflow_failed", {
-                "workflow_id": result.workflow_id,
-                "error": result.error,
-            })
+            self.event_dispatcher.publish(
+                "workflow_failed",
+                {
+                    "workflow_id": result.workflow_id,
+                    "error": result.error,
+                },
+            )
         else:
-            self.event_dispatcher.publish("workflow_completed", {
-                "workflow_id": result.workflow_id,
-                "status": result.status.value,
-                "steps": len(result.step_results),
-            })
+            self.event_dispatcher.publish(
+                "workflow_completed",
+                {
+                    "workflow_id": result.workflow_id,
+                    "status": result.status.value,
+                    "steps": len(result.step_results),
+                },
+            )
 
         # Telemetry alerts
         self.telemetry_bridge.record_workflow_result(result, query=query)
@@ -336,9 +349,7 @@ class AgentWorkflowIntegrationHandler:
     def get_execution_stats(self) -> Dict[str, Any]:
         """Return operational execution statistics."""
         avg_lat = (
-            self._total_latency_ms / self._execution_count
-            if self._execution_count > 0
-            else 0.0
+            self._total_latency_ms / self._execution_count if self._execution_count > 0 else 0.0
         )
         return {
             "total_executions": self._execution_count,

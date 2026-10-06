@@ -829,12 +829,14 @@ config = MCPConfig(
 server = create_mcp_server(config=config, enable_session_handler=True)
 
 # 2. Query available tools via JSON-RPC protocol
-list_tools_request = json.dumps({
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "tools/list",
-    "params": {},
-})
+list_tools_request = json.dumps(
+    {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+        "params": {},
+    }
+)
 
 raw_response = server.handle_message(list_tools_request)
 response_data = json.loads(raw_response)
@@ -842,23 +844,25 @@ tools = response_data["result"]["tools"]
 print(f"Server exposed {len(tools)} tools: {[t['name'] for t in tools]}")
 
 # 3. Invoke rag_evaluate tool via JSON-RPC request
-eval_request = json.dumps({
-    "jsonrpc": "2.0",
-    "id": 2,
-    "method": "tools/call",
-    "params": {
-        "name": "rag_evaluate",
-        "arguments": {
-            "query_text": "What were Apple's net sales in fiscal 2024?",
-            "generated_answer": "Apple reported net sales of $391.0 billion in fiscal 2024.",
-            "context_chunks": [
-                "Apple Inc. reported net sales of $391.0 billion for the fiscal year ended September 28, 2024."
-            ],
-            "ticker": "AAPL",
-            "mode": "STRICT",
+eval_request = json.dumps(
+    {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "rag_evaluate",
+            "arguments": {
+                "query_text": "What were Apple's net sales in fiscal 2024?",
+                "generated_answer": "Apple reported net sales of $391.0 billion in fiscal 2024.",
+                "context_chunks": [
+                    "Apple Inc. reported net sales of $391.0 billion for the fiscal year ended September 28, 2024."
+                ],
+                "ticker": "AAPL",
+                "mode": "STRICT",
+            },
         },
-    },
-})
+    }
+)
 
 eval_raw_response = server.handle_message(eval_request)
 eval_result = json.loads(eval_raw_response)["result"]
@@ -911,10 +915,12 @@ from production_rag_evaluation.mcp import (
 # 1. Setup dispatcher and subscribe to real-time events
 dispatcher = MCPNotificationDispatcher()
 
+
 def on_evaluation_event(topic: str, payload: dict) -> None:
     tool = payload.get("tool")
     latency = payload.get("latency_ms", 0.0)
     print(f"[EVENT] Topic: {topic} | Tool: {tool} | Latency: {latency:.2f}ms")
+
 
 # Subscribe to all tool events using wildcard
 dispatcher.subscribe("*", on_evaluation_event)

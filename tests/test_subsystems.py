@@ -1496,7 +1496,9 @@ class TestAgentSwarmSubsystems:
             telemetry_collector=collector,
         )
 
-        q = RAGQuery(query_id="q-subsys-1", ticker="AAPL", query_text="Net sales in fiscal year 2024?")
+        q = RAGQuery(
+            query_id="q-subsys-1", ticker="AAPL", query_text="Net sales in fiscal year 2024?"
+        )
         resp = RAGResponse(
             query_id="q-subsys-1",
             generated_answer="Apple reported net sales of $391.0 billion in fiscal year 2024.",
@@ -1518,9 +1520,7 @@ class TestAgentSwarmSubsystems:
         assert stats["total_errors"] == 0
         assert stats["average_latency_ms"] > 0
 
-    def test_workflow_integration_handler_caching_and_batch(
-        self, sample_chunk_apple
-    ) -> None:
+    def test_workflow_integration_handler_caching_and_batch(self, sample_chunk_apple) -> None:
         from production_rag_evaluation.agents.handlers import AgentWorkflowIntegrationHandler
         from production_rag_evaluation.core.cache import SemanticCache
         from production_rag_evaluation.models.schemas import EvaluationMode, RAGQuery, RAGResponse
@@ -1556,7 +1556,9 @@ class TestAgentSwarmSubsystems:
                 resp,
             ),
         ]
-        batch_results = handler.handle_batch_workflow(batch_pairs, evaluation_mode=EvaluationMode.FAST)
+        batch_results = handler.handle_batch_workflow(
+            batch_pairs, evaluation_mode=EvaluationMode.FAST
+        )
         assert len(batch_results) == 2
         assert all(b.status.value == "completed" for b in batch_results)
 
@@ -1607,4 +1609,3 @@ class TestAgentSwarmSubsystems:
         stats = handler.get_execution_stats()
         assert "rag_swarm_evaluate" in stats["stats_by_tool"]
         assert stats["stats_by_tool"]["rag_swarm_evaluate"]["call_count"] == 1
-

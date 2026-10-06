@@ -553,7 +553,9 @@ def handle_rag_swarm_evaluate(
         if hasattr(EvaluationMode, mode.upper())
         else EvaluationMode.THOROUGH
     )
-    plan = orchestrator.create_plan(rag_query, rag_resp, returns=returns_arr, evaluation_mode=eval_mode)
+    plan = orchestrator.create_plan(
+        rag_query, rag_resp, returns=returns_arr, evaluation_mode=eval_mode
+    )
     res = orchestrator.execute_workflow(rag_query, rag_resp, returns=returns_arr, plan=plan)
 
     synth_res = res.step_results.get("synthesis_and_reporting", {})
