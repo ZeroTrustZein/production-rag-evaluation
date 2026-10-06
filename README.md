@@ -15,14 +15,21 @@ An institutional-grade evaluation, hallucination detection, and quantitative ris
 
 Detailed technical guides and reference manuals are available in the [`docs/`](docs/) directory:
 
-- 📐 **[System Architecture & Quantitative Formulations](docs/ARCHITECTURE.md)**: Deep mathematical formulations (DAG state machine, n-gram hashing, Cornish-Fisher VaR, GBM & fat-tailed Student-t shocks, Welch's t-test drift detection).
-- 📚 **[Python API Reference](docs/API_REFERENCE.md)**: Comprehensive reference for all domain models, classes, protocols, parameters, return types, and exceptions.
-- 🚀 **[User & CLI Guide](docs/USAGE_GUIDE.md)**: Complete command-line manual, option explanations, downstream JSON recipes, and end-to-end Python workflows.
+- 📐 **[System Architecture & Quantitative Formulations](docs/ARCHITECTURE.md)**: Deep mathematical formulations (DAG state machine, multi-agent swarm orchestration, Cornish-Fisher VaR, GBM & fat-tailed Student-t shocks, Welch's t-test drift detection).
+- 📚 **[Python API Reference](docs/API_REFERENCE.md)**: Comprehensive reference for all domain models, classes, multi-agent protocols, parameters, return types, and exceptions.
+- 🚀 **[User & CLI Guide](docs/USAGE_GUIDE.md)**: Complete command-line manual, swarm workflow guides, option explanations, downstream JSON recipes, and end-to-end Python workflows.
 
 ---
 
 ## Key Features
 
+- **Multi-Agent Swarm Orchestration Engine (`agents`)**:
+  - Role-specialized autonomous agents: `PlannerAgent`, `AuditorAgent`, `EvaluatorAgent`, `RiskAnalystAgent`, and `SynthesizerAgent`.
+  - Directed Acyclic Graph (DAG) plan generation with topological barrier resolution and parallel step dispatch (`ThreadPoolExecutor`).
+  - Inter-agent message broker (`AgentMessageBroker`) with direct routing, swarm broadcast (`*`), and audit trails.
+  - Lifecycle publish-subscribe event bus (`WorkflowEventDispatcher`) for real-time observability.
+  - Fail-safe guardrails including halt-on-critical-hallucination policies and automatic step retries.
+  - High-level enterprise facade (`AgentWorkflowIntegrationHandler`) unifying caching, feature stores, telemetry, and swarm orchestration.
 - **Multi-Dimensional RAG Evaluation Framework**:
   - Faithfulness, Answer Relevance, Context Precision, Context Recall, and Citation Grounding scores.
   - Configurable execution modes: `FAST`, `THOROUGH`, `FINANCIAL_STRICT`, and `AUDIT`.
@@ -63,12 +70,13 @@ Detailed technical guides and reference manuals are available in the [`docs/`](d
   - Point-in-time multi-group join matrix export to Parquet, CSV, JSON, and Arrow.
 - **Model Context Protocol (MCP) Server & Tool Suite (`rag-eval mcp`)**:
   - Full JSON-RPC 2.0 implementation compliant with MCP specification version `2024-11-05`.
-  - 6 standardized agent tools: `rag_evaluate`, `rag_detect_hallucinations`, `rag_risk_metrics`, `rag_stress_test`, `rag_feature_stats`, `rag_cache_lookup`.
+  - 7 standardized agent tools: `rag_evaluate`, `rag_detect_hallucinations`, `rag_risk_metrics`, `rag_stress_test`, `rag_feature_stats`, `rag_cache_lookup`, `rag_swarm_evaluate`.
   - Dynamic virtual resources via `rag://` scheme (`rag://system/health`, `rag://features/schema`, `rag://finance/scenarios`, `rag://evaluations/summary`).
   - Parameterized prompt workflows: `earnings_call_audit`, `sec_10k_verification`, `portfolio_risk_audit`.
   - Multi-transport dispatching: stdio for Claude Desktop, OpenCode, and Cursor; HTTP/SSE for remote multi-agent clusters.
 - **Production CLI & Script Automation (`rag-eval`)**:
   - Full support for interactive Rich tables and scriptable `--json-out`.
+  - Multi-agent swarm commands (`rag-eval swarm list-agents`, `rag-eval swarm plan`, `rag-eval swarm run`).
   - Batch evaluation from JSON and JSONL datasets with p95 latency reporting.
   - Feature store management commands (`rag-eval feature-store stats/compact/export/drift/list-schemas`).
   - Model Context Protocol server suite (`rag-eval mcp serve/list-tools/list-resources/list-prompts/call-tool`).
@@ -101,9 +109,22 @@ Detailed technical guides and reference manuals are available in the [`docs/`](d
 |  [extract_claims] -> [verify_citations] -> [detect_hallucinations]                |
 |  -> [verify_claims] -> [verify_targets] -> [compute_relevance]                    |
 |  -> [aggregate_metrics]                                                           |
-+-------------------------------------------------------------+---------------------+
-                                                              |
-                                                              v
++-----------------------------------------+-----------------------------------------+
+                                          |
+                                          v
++-----------------------------------------------------------------------------------+
+|             Multi-Agent Swarm Orchestration Engine (AgentSwarmOrchestrator)       |
+|  - PlannerAgent (DAG planning, step dependency mapping, barrier resolution)      |
+|  - Parallel execution barrier:                                                    |
+|      +-- AuditorAgent (numerical distortion, direction contradiction, severity)   |
+|      +-- EvaluatorAgent (faithfulness, answer relevance, context recall)          |
+|  - RiskAnalystAgent (Sharpe/Sortino ratios, VaR, Monte Carlo stress simulation)   |
+|  - SynthesizerAgent (composite health scoring, approval gates, recommendations)   |
+|  - AgentMessageBroker (inter-agent messaging, broadcast, audit trails)            |
+|  - WorkflowEventDispatcher (pub/sub lifecycle hooks)                              |
++-----------------------------------------+-----------------------------------------+
+                                          |
+                                          v
 +-----------------------------------------------------------------------------------+
 |                     Downstream Financial & Operational Analytics                  |
 |  - FinancialRiskEngine (Sharpe, Sortino, Calmar, Historical & Cornish-Fisher VaR)  |
@@ -194,6 +215,43 @@ print(f"Hallucination Rate: {metrics.hallucination_rate:.2%}")
 print(f"Latency: {metrics.evaluation_latency_ms} ms")
 ```
 
+### Multi-Agent Swarm Orchestration Example
+
+```python
+from production_rag_evaluation import (
+    create_default_orchestrator,
+    RAGQuery,
+    RAGResponse,
+    DocumentChunk,
+    DocumentType,
+)
+
+# 1. Initialize multi-agent swarm orchestrator
+orchestrator = create_default_orchestrator()
+
+# 2. Define query and retrieved context
+query = RAGQuery(query_id="q-swarm-1", query_text="What were Apple's FY2024 net sales?", ticker="AAPL")
+chunk = DocumentChunk(
+    chunk_id="chunk-1",
+    ticker="AAPL",
+    doc_type=DocumentType.SEC_10K,
+    text="Apple reported net sales of $391.0 billion in fiscal year 2024.",
+)
+response = RAGResponse(
+    query_id="q-swarm-1",
+    generated_answer="Apple reported net sales of $391.0 billion for FY2024.",
+    retrieved_chunks=[chunk],
+)
+
+# 3. Generate DAG workflow plan & execute swarm
+plan = orchestrator.create_plan(query=query, response=response)
+result = orchestrator.execute_workflow(query=query, response=response, plan=plan)
+
+print(f"Workflow Status: {result.status.value}")
+print(f"Executive Summary: {result.summary}")
+print(f"Recommendations: {result.recommendations}")
+```
+
 ---
 
 ### Command-Line Interface (CLI)
@@ -206,35 +264,50 @@ rag-eval evaluate \
   -c "For fiscal year 2024, Apple reported net sales of $391.0 billion." \
   -T "net_sales=391.0e9"
 
-# 2. Standalone hallucination audit
+# 2. Multi-agent swarm evaluation workflow (parallel auditor + evaluator)
+rag-eval swarm run \
+  -q "What were Apple's net sales in 2024?" \
+  -a "Apple reported net sales of $391.0 billion." \
+  -c "For fiscal year 2024, Apple reported net sales of $391.0 billion." \
+  --mode thorough \
+  --concurrency 5
+
+# 3. Inspect swarm agent registry and DAG execution plan
+rag-eval swarm list-agents
+rag-eval swarm plan \
+  -q "What were Apple's net sales in 2024?" \
+  -a "Apple reported net sales of $391.0 billion." \
+  -c "For fiscal year 2024, Apple reported net sales of $391.0 billion."
+
+# 4. Standalone hallucination audit
 rag-eval audit \
   -a "Apple revenue dropped to $450 billion." \
   -c "Apple reported net sales of $391.0 billion, up 2%."
 
-# 3. Quantitative portfolio risk metrics
+# 5. Quantitative portfolio risk metrics
 rag-eval risk-metrics \
   -r "0.005,-0.002,0.008,-0.004,0.003,0.006,-0.001,0.007" \
   -b "0.003,-0.001,0.005,-0.002,0.002,0.004,-0.001,0.004"
 
-# 4. Monte Carlo stress simulation (Liquidity Crunch scenario)
+# 6. Monte Carlo stress simulation (Liquidity Crunch scenario)
 rag-eval stress-test --scenario LIQUIDITY_CRUNCH -n 1000 -h 30
 
-# 5. Pipeline telemetry & statistical drift check
+# 7. Pipeline telemetry & statistical drift check
 rag-eval telemetry --check-drift --drift-metric faithfulness_score
 
-# 6. Cache stats
+# 8. Cache stats
 rag-eval cache stats
 
-# 7. Columnar feature store storage metrics & PSI drift detection
+# 9. Columnar feature store storage metrics & PSI drift detection
 rag-eval feature-store stats --path ./data/feature_store
 rag-eval feature-store drift --path ./data/feature_store --psi-threshold 0.25
 rag-eval feature-store compact --path ./data/feature_store --ttl 2592000
 
-# 8. Model Context Protocol (MCP) server & tool execution
+# 10. Model Context Protocol (MCP) server & tool execution
 rag-eval mcp list-tools
 rag-eval mcp list-resources
 rag-eval mcp list-prompts
-rag-eval mcp call-tool -n rag_evaluate -a '{"query_text": "...", "generated_answer": "...", "context_chunks": ["..."]}'
+rag-eval mcp call-tool -n rag_swarm_evaluate -a '{"query_text": "...", "generated_answer": "...", "context_chunks": ["..."]}'
 rag-eval mcp serve --transport stdio
 ```
 
@@ -255,7 +328,7 @@ Connect `production-rag-evaluation` directly to Claude Desktop, OpenCode, or Cur
 }
 ```
 
-Exposes 6 agent tools (`rag_evaluate`, `rag_detect_hallucinations`, `rag_risk_metrics`, `rag_stress_test`, `rag_feature_stats`, `rag_cache_lookup`), dynamic resources (`rag://system/health`, `rag://features/schema`, `rag://finance/scenarios`, `rag://evaluations/summary`), and guided audit prompts (`earnings_call_audit`, `sec_10k_verification`, `portfolio_risk_audit`).
+Exposes 7 agent tools (`rag_evaluate`, `rag_detect_hallucinations`, `rag_risk_metrics`, `rag_stress_test`, `rag_feature_stats`, `rag_cache_lookup`, `rag_swarm_evaluate`), dynamic resources (`rag://system/health`, `rag://features/schema`, `rag://finance/scenarios`, `rag://evaluations/summary`), and guided audit prompts (`earnings_call_audit`, `sec_10k_verification`, `portfolio_risk_audit`).
 
 ---
 
@@ -269,6 +342,12 @@ production-rag-evaluation/
 |   |-- API_REFERENCE.md           # Exhaustive Python API reference
 |   +-- USAGE_GUIDE.md             # CLI manual, option flags, and Python workflow recipes
 |-- src/production_rag_evaluation/
+|   |-- agents/
+|   |   |-- base.py                # BaseAgent abstract class & AgentRegistry
+|   |   |-- handlers.py            # EventDispatcher, MessageBroker, TelemetryBridge, IntegrationHandler
+|   |   |-- models.py              # AgentRole, WorkflowStep, WorkflowPlan, ExecutionResult models
+|   |   |-- orchestrator.py        # AgentSwarmOrchestrator multi-agent DAG runner
+|   |   +-- specialized.py         # Planner, Evaluator, Auditor, RiskAnalyst, Synthesizer agents
 |   |-- core/
 |   |   |-- cache.py               # Deterministic n-gram hash vectorizer & semantic cache
 |   |   |-- evaluator.py           # Top-level evaluation orchestrator
