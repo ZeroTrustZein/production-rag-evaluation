@@ -1,11 +1,10 @@
 # Production RAG Evaluation & Quantitative Financial Risk Pipeline
 
-[![CI](https://github.com/zein/production-rag-evaluation/actions/workflows/ci.yml/badge.svg)](https://github.com/zein/production-rag-evaluation/actions)
+[![CI](https://github.com/ZeroTrustZein/production-rag-evaluation/actions/workflows/ci.yml/badge.svg)](https://github.com/ZeroTrustZein/production-rag-evaluation/actions)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type Checked: Mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](https://mypy-lang.org/)
-[![Test Coverage: 100%](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/zein/production-rag-evaluation)
 
 An institutional-grade evaluation, hallucination detection, and quantitative risk platform engineered to audit, benchmark, stress-test, and guardrail Retrieval-Augmented Generation (RAG) pipelines operating on financial earnings calls, SEC filings (10-K, 10-Q, 8-K), and equity research reports.
 
@@ -149,7 +148,7 @@ Detailed technical guides and reference manuals are available in the [`docs/`](d
 
 ```bash
 # Clone repository
-git clone https://github.com/zein/production-rag-evaluation.git
+git clone https://github.com/ZeroTrustZein/production-rag-evaluation.git
 cd production-rag-evaluation
 
 # Create and activate virtual environment
@@ -230,7 +229,9 @@ from production_rag_evaluation import (
 orchestrator = create_default_orchestrator()
 
 # 2. Define query and retrieved context
-query = RAGQuery(query_id="q-swarm-1", query_text="What were Apple's FY2024 net sales?", ticker="AAPL")
+query = RAGQuery(
+    query_id="q-swarm-1", query_text="What were Apple's FY2024 net sales?", ticker="AAPL"
+)
 chunk = DocumentChunk(
     chunk_id="chunk-1",
     ticker="AAPL",
@@ -423,4 +424,4 @@ python -m ruff check .
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

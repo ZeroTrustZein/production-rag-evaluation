@@ -444,9 +444,9 @@ Where:
 - $\epsilon = 10^{-4}$: Regularization constant preventing division by zero or undefined logarithms.
 
 #### Drift Decision Boundaries
-- **$PSI < 0.10$**: **Negligible Shift** — Feature distribution remains stable; normal operation.
-- **$0.10 \le PSI < 0.25$**: **Moderate Shift** — Detectable feature divergence; raises `AlertSeverity.WARNING` telemetry alert.
-- **$PSI \ge 0.25$**: **Significant Shift** — Substantial structural divergence; raises `AlertSeverity.CRITICAL` alert and flags upstream retrieval or model drift.
+- **$PSI < 0.10$**: **Negligible Shift**: Feature distribution remains stable; normal operation.
+- **$0.10 \le PSI < 0.25$**: **Moderate Shift**: Detectable feature divergence; raises `AlertSeverity.WARNING` telemetry alert.
+- **$PSI \ge 0.25$**: **Significant Shift**: Substantial structural divergence; raises `AlertSeverity.CRITICAL` alert and flags upstream retrieval or model drift.
 
 In addition to PSI, the detector tracks continuous summary delta metrics:
 $$\Delta\mu = \frac{\bar{X}_{\text{target}} - \bar{X}_{\text{baseline}}}{\sigma_{\text{baseline}} + \epsilon}, \quad \Delta\sigma = \frac{s_{\text{target}} - s_{\text{baseline}}}{s_{\text{baseline}} + \epsilon}$$
