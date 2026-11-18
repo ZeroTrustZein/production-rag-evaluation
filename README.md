@@ -229,7 +229,9 @@ from production_rag_evaluation import (
 orchestrator = create_default_orchestrator()
 
 # 2. Define query and retrieved context
-query = RAGQuery(query_id="q-swarm-1", query_text="What were Apple's FY2024 net sales?", ticker="AAPL")
+query = RAGQuery(
+    query_id="q-swarm-1", query_text="What were Apple's FY2024 net sales?", ticker="AAPL"
+)
 chunk = DocumentChunk(
     chunk_id="chunk-1",
     ticker="AAPL",
@@ -422,4 +424,4 @@ python -m ruff check .
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

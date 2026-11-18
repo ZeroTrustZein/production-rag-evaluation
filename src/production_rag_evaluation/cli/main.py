@@ -63,9 +63,15 @@ def _read_text_or_file(value: str) -> str:
         if path.is_file():
             return path.read_text(encoding="utf-8").strip()
         raise click.BadParameter(f"File '{path}' does not exist.")
-    path = Path(value)
-    if path.is_file() and value.endswith((".txt", ".json", ".md", ".csv", ".jsonl")):
-        return path.read_text(encoding="utf-8").strip()
+    if not value.endswith((".txt", ".json", ".md", ".csv", ".jsonl")):
+        return value
+    try:
+        path = Path(value)
+        if path.is_file():
+            return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        # Inline values such as long JSON strings are not valid paths.
+        pass
     return value
 
 
