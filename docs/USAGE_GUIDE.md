@@ -10,7 +10,7 @@ Practical guide, CLI manual, and Python integration recipes for **`production-ra
 Clone the repository and install in editable mode:
 
 ```bash
-git clone https://github.com/zein/production-rag-evaluation.git
+git clone https://github.com/ZeroTrustZein/production-rag-evaluation.git
 cd production-rag-evaluation
 
 # Create and activate Python virtual environment (Python 3.10+)
